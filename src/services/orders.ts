@@ -34,7 +34,6 @@ export async function updateTableStatus(tableId: string, status: TableStatus) {
   await updateDoc(doc(db, 'tables', tableId), { status })
 }
 
-/** Busca o ID da mesa pelo número e atualiza o status */
 async function setTableStatusByNumber(
   restaurantId: string,
   tableNumber: number,
@@ -87,7 +86,6 @@ export async function createOrder(
 ): Promise<string> {
   const total = items.reduce((sum, i) => sum + i.price * i.qty, 0)
 
-  // Cria o pedido
   const orderRef = await addDoc(collection(db, 'orders'), {
     restaurantId,
     tableNumber,
@@ -96,7 +94,6 @@ export async function createOrder(
     total,
   })
 
-  // Cria os itens
   await Promise.all(
     items.map((item) =>
       addDoc(collection(db, 'order_items'), {
@@ -109,41 +106,32 @@ export async function createOrder(
     ),
   )
 
-  // Abre a mesa usando getDocs (correto — não usa onSnapshot)
   await setTableStatusByNumber(restaurantId, tableNumber, 'open')
-
   return orderRef.id
 }
 
-/**
- * Atualiza o status do pedido.
- * Quando fechado (closed), verifica se a mesa tem outros pedidos abertos.
- * Se não tiver, libera a mesa automaticamente.
- */
 export async function updateOrderStatus(
   orderId: string,
   status: OrderStatus,
-  restaurantId?: string,
-  tableNumber?: number,
 ) {
   await updateDoc(doc(db, 'orders', orderId), { status })
+}
 
-  // Libera a mesa quando o pedido é fechado
-  if (status === 'closed' && restaurantId && tableNumber !== undefined) {
-    // Verifica se ainda há pedidos abertos nessa mesa
-    const q = query(
-      collection(db, 'orders'),
-      where('restaurantId', '==', restaurantId),
-      where('tableNumber', '==', tableNumber),
-      where('status', 'in', ['new', 'preparing', 'ready']),
-    )
-    const snap = await getDocs(q)
-
-    if (snap.empty) {
-      // Nenhum pedido aberto → libera a mesa
-      await setTableStatusByNumber(restaurantId, tableNumber, 'free')
-    }
-  }
+/**
+ * Fecha TODOS os pedidos de uma mesa de uma vez e libera a mesa.
+ * Use este no Caixa ao fechar a conta.
+ */
+export async function closeTableOrders(
+  restaurantId: string,
+  tableNumber: number,
+  orderIds: string[],
+): Promise<void> {
+  // 1. Fecha todos os pedidos simultaneamente
+  await Promise.all(
+    orderIds.map((id) => updateDoc(doc(db, 'orders', id), { status: 'closed' })),
+  )
+  // 2. Libera a mesa diretamente — sem precisar verificar
+  await setTableStatusByNumber(restaurantId, tableNumber, 'free')
 }
 
 // ─── Order Items ──────────────────────────────────────────────────────────────

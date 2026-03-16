@@ -5,7 +5,7 @@ import { PixModal } from "@/components/PixModal"
 import { useTables } from "@/hooks/useTables"
 import { useOrders } from "@/hooks/useOrders"
 import { useAuth } from "@/hooks/useAuth"
-import { updateOrderStatus, subscribeOrderItems } from "@/services/orders"
+import { closeTableOrders, subscribeOrderItems, updateTableStatus } from "@/services/orders"
 import { doc, getDoc } from "firebase/firestore"
 import { db } from "@/services/firebase"
 import type { Table, Order, OrderItem } from "@/types"
@@ -43,11 +43,17 @@ function BillModal({
 
   async function handleManualClose() {
     setClosing(true)
-    await Promise.all(
-      orders.map((o) => updateOrderStatus(o.id, "closed", restaurantId, table.number))
-    )
-    setClosing(false)
-    onClose()
+    try {
+      if (orders.length > 0) {
+        await closeTableOrders(restaurantId, table.number, orders.map((o) => o.id))
+      } else {
+        // Sem pedidos ativos — libera a mesa diretamente
+        await updateTableStatus(table.id, "free")
+      }
+      onClose()
+    } finally {
+      setClosing(false)
+    }
   }
 
   if (showPix && mainOrderId) {
@@ -70,43 +76,54 @@ function BillModal({
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">✕</button>
         </div>
 
-        <div className="mb-4 max-h-64 overflow-y-auto rounded-xl border border-gray-100 divide-y divide-gray-50">
-          {allItems.map((item) => (
-            <div key={item.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
-              <span className="text-gray-700">{item.qty}× {item.name}</span>
-              <span className="text-gray-800">R$ {(item.price * item.qty).toFixed(2)}</span>
+        {allItems.length > 0 ? (
+          <div className="mb-4 max-h-64 overflow-y-auto rounded-xl border border-gray-100 divide-y divide-gray-50">
+            {allItems.map((item) => (
+              <div key={item.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
+                <span className="text-gray-700">{item.qty}× {item.name}</span>
+                <span className="text-gray-800">R$ {(item.price * item.qty).toFixed(2)}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            Nenhum item encontrado. Clique em "Fechar" para liberar a mesa.
+          </div>
+        )}
+
+        {allItems.length > 0 && (
+          <div className="space-y-1.5 rounded-xl bg-gray-50 px-4 py-3 mb-4">
+            <div className="flex justify-between text-sm text-gray-600">
+              <span>Subtotal</span><span>R$ {subtotal.toFixed(2)}</span>
             </div>
-          ))}
-        </div>
+            <div className="flex justify-between text-sm text-gray-600">
+              <span>Taxa serviço ({(serviceRate * 100).toFixed(0)}%)</span>
+              <span>R$ {service.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between border-t border-gray-200 pt-1.5 text-base font-semibold text-gray-900">
+              <span>Total</span><span>R$ {total.toFixed(2)}</span>
+            </div>
+          </div>
+        )}
 
-        <div className="space-y-1.5 rounded-xl bg-gray-50 px-4 py-3">
-          <div className="flex justify-between text-sm text-gray-600">
-            <span>Subtotal</span><span>R$ {subtotal.toFixed(2)}</span>
-          </div>
-          <div className="flex justify-between text-sm text-gray-600">
-            <span>Taxa serviço ({(serviceRate * 100).toFixed(0)}%)</span>
-            <span>R$ {service.toFixed(2)}</span>
-          </div>
-          <div className="flex justify-between border-t border-gray-200 pt-1.5 text-base font-semibold text-gray-900">
-            <span>Total</span><span>R$ {total.toFixed(2)}</span>
-          </div>
-        </div>
-
-        <div className="mt-4 grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <button onClick={onClose} className="btn-secondary">Cancelar</button>
+          {allItems.length > 0 && mainOrderId && (
+            <button
+              onClick={() => setShowPix(true)}
+              className="rounded-xl bg-green-500 py-2.5 text-sm font-semibold text-white hover:bg-green-600"
+            >
+              💳 PIX
+            </button>
+          )}
           <button
-            onClick={() => setShowPix(true)}
-            className="rounded-xl bg-green-500 py-2.5 text-sm font-semibold text-white hover:bg-green-600"
+            onClick={handleManualClose}
+            disabled={closing}
+            className={`btn-primary ${allItems.length === 0 ? 'col-span-2' : ''}`}
           >
-            💳 PIX
-          </button>
-          <button onClick={handleManualClose} disabled={closing} className="btn-primary">
-            {closing ? "…" : "✅ Fechar"}
+            {closing ? "…" : "✅ Fechar mesa"}
           </button>
         </div>
-        <p className="mt-2 text-center text-xs text-gray-400">
-          PIX gera QR automático · Fechar marca como pago manualmente
-        </p>
       </div>
     </div>
   )
@@ -118,6 +135,7 @@ export default function CashierPage() {
   const { restaurantId }        = useAuth()
   const [selected, setSelected] = useState<Table | null>(null)
 
+  // Inclui mesas closing também
   const openTables = tables.filter((t) => t.status === "open" || t.status === "closing")
 
   function getTableOrders(tableNumber: number) {
@@ -126,9 +144,12 @@ export default function CashierPage() {
 
   return (
     <Layout>
-      <PageHeader title="Caixa / PDV" subtitle={`${openTables.length} mesa${openTables.length !== 1 ? "s" : ""} abertas`} />
+      <PageHeader
+        title="Caixa / PDV"
+        subtitle={`${openTables.length} mesa${openTables.length !== 1 ? "s" : ""} abertas`}
+      />
 
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-4 md:p-6">
         {openTables.length === 0 ? (
           <div className="flex h-64 flex-col items-center justify-center gap-2 text-gray-400">
             <span className="text-5xl">🎉</span>
@@ -143,11 +164,13 @@ export default function CashierPage() {
                 <div key={table.id} className="rounded-2xl border border-gray-100 bg-white p-5">
                   <div className="mb-3 flex items-center justify-between">
                     <span className="text-xl font-bold text-gray-800">Mesa {table.number}</span>
-                    <span className="text-sm font-semibold text-gray-700">R$ {tableTotal.toFixed(2)}</span>
+                    <span className="text-sm font-semibold text-gray-700">
+                      {tableTotal > 0 ? `R$ ${tableTotal.toFixed(2)}` : ''}
+                    </span>
                   </div>
                   <div className="mb-4 space-y-1.5">
                     {tableOrders.length === 0 ? (
-                      <p className="text-xs text-gray-400">Sem pedidos ativos</p>
+                      <p className="text-xs text-amber-600">⚠️ Mesa aberta sem pedidos ativos</p>
                     ) : tableOrders.map((o) => (
                       <div key={o.id} className="flex items-center justify-between">
                         <span className="text-xs text-gray-500">
@@ -157,8 +180,11 @@ export default function CashierPage() {
                       </div>
                     ))}
                   </div>
-                  <button onClick={() => setSelected(table)} className="btn-primary w-full text-sm">
-                    Ver conta
+                  <button
+                    onClick={() => setSelected(table)}
+                    className="btn-primary w-full text-sm"
+                  >
+                    {tableOrders.length === 0 ? "Liberar mesa" : "Ver conta"}
                   </button>
                 </div>
               )
