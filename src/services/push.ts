@@ -7,13 +7,15 @@ import {
 // VAPID public key — gere em https://web-push-codelab.glitch.me/
 // ou via: npx web-push generate-vapid-keys
 // Coloque a chave pública no .env como VITE_VAPID_PUBLIC_KEY
-const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY as string
+const VAPID_PUBLIC_KEY: string = import.meta.env.VITE_VAPID_PUBLIC_KEY ?? ''
 
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
+function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4)
   const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/')
   const raw     = window.atob(base64)
-  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)))
+  const output = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i++) output[i] = raw.charCodeAt(i)
+  return output.buffer
 }
 
 /**

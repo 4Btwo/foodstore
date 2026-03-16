@@ -32,7 +32,7 @@ export async function createUser(data: {
 }): Promise<void> {
   if (!auth.currentUser) throw new Error('Admin não autenticado')
 
-  const apiKey = import.meta.env.VITE_FIREBASE_API_KEY as string
+  const apiKey: string = import.meta.env.VITE_FIREBASE_API_KEY
 
   const res = await fetch(
     `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`,

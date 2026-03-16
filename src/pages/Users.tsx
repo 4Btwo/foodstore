@@ -128,7 +128,7 @@ export default function UsersPage() {
   }
 
   const sorted = [...users].sort((a, b) => {
-    const order: Record<Role, number> = { admin: 0, cashier: 1, waiter: 2 }
+    const order: Record<Role, number> = { admin: 0, cashier: 1, waiter: 2, kitchen: 3 }
     return order[a.role] - order[b.role]
   })
 

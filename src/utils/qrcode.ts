@@ -6,7 +6,7 @@
  * Em desenvolvimento usa window.location.origin automaticamente.
  */
 export function getTableQrUrl(restaurantId: string, tableNumber: number): string {
-  const base = import.meta.env.VITE_APP_URL ?? window.location.origin
+  const base: string = (import.meta.env.VITE_APP_URL as string) || window.location.origin
   return `${base}/menu/${restaurantId}/${tableNumber}`
 }
 
