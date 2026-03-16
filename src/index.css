@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-gray-50 text-gray-900 font-sans;
+    margin: 0;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white
+           transition hover:bg-brand-600 focus:outline-none focus:ring-2
+           focus:ring-brand-500/40 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .btn-secondary {
+    @apply rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm
+           font-medium text-gray-700 transition hover:bg-gray-50
+           focus:outline-none focus:ring-2 focus:ring-gray-200
+           disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .input {
+    @apply block w-full rounded-lg border border-gray-200 px-3.5 py-2.5
+           text-sm text-gray-900 placeholder-gray-400
+           focus:border-brand-500 focus:outline-none focus:ring-2
+           focus:ring-brand-500/20;
+  }
+
+  .card {
+    @apply rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100;
+  }
+
+  .badge-new       { @apply inline-flex items-center rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700; }
+  .badge-preparing { @apply inline-flex items-center rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700; }
+  .badge-ready     { @apply inline-flex items-center rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-700; }
+  .badge-closed    { @apply inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-500; }
+
+  .table-free    { @apply border-green-200 bg-green-50; }
+  .table-open    { @apply border-amber-200 bg-amber-50; }
+  .table-closing { @apply border-red-200 bg-red-50; }
+}
