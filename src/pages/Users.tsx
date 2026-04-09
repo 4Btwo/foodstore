@@ -5,17 +5,27 @@ import { subscribeUsers, createUser, disableUser, enableUser, updateUserRole } f
 import type { AppUser, Role } from '@/types'
 
 const ROLE_LABEL: Record<Role, string> = {
-  admin:   'Admin',
-  cashier: 'Caixa',
-  waiter:  'Garçom',
-  kitchen: 'Cozinha',
+  admin:    'Admin',
+  cashier:  'Caixa',
+  waiter:   'Garçom',
+  kitchen:  'Cozinha',
+  delivery: 'Entregador',
 }
 const ROLE_COLOR: Record<Role, string> = {
-  admin:   'bg-purple-50 text-purple-700',
-  cashier: 'bg-blue-50 text-blue-700',
-  waiter:  'bg-amber-50 text-amber-700',
-  kitchen: 'bg-green-50 text-green-700',
+  admin:    'bg-purple-50 text-purple-700',
+  cashier:  'bg-blue-50 text-blue-700',
+  waiter:   'bg-amber-50 text-amber-700',
+  kitchen:  'bg-green-50 text-green-700',
+  delivery: 'bg-orange-50 text-orange-700',
 }
+const ROLE_ACCESS: Record<Role, string> = {
+  admin:    'Acesso total',
+  cashier:  'Caixa / PDV · Marmitaria',
+  waiter:   'Mesas · Pedidos · Marmitaria',
+  kitchen:  'Cozinha (somente)',
+  delivery: 'Dashboard de Entregas',
+}
+const SELECTABLE_ROLES: Role[] = ['waiter', 'cashier', 'kitchen', 'delivery']
 
 type ExtUser = AppUser & { disabled?: boolean }
 
@@ -28,19 +38,20 @@ function UserModal({ restaurantId, onClose }: { restaurantId: string; onClose: (
   const [error, setError]       = useState('')
 
   async function handleSave() {
-    if (!name.trim())          { setError('Nome é obrigatório'); return }
-    if (!email.trim())         { setError('E-mail é obrigatório'); return }
-    if (password.length < 6)   { setError('Senha mínimo 6 caracteres'); return }
-    setSaving(true)
-    setError('')
+    if (!name.trim())        { setError('Nome é obrigatório'); return }
+    if (!email.trim())       { setError('E-mail é obrigatório'); return }
+    if (password.length < 6) { setError('Senha mínimo 6 caracteres'); return }
+    setSaving(true); setError('')
     try {
       await createUser({ name, email, password, role, restaurantId })
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao criar usuário')
-    } finally {
-      setSaving(false)
-    }
+    } finally { setSaving(false) }
+  }
+
+  const roleIcons: Record<Role, string> = {
+    admin: '', waiter: '🧑‍🍳', cashier: '💳', kitchen: '👨‍🍳', delivery: '🛵',
   }
 
   return (
@@ -68,24 +79,20 @@ function UserModal({ restaurantId, onClose }: { restaurantId: string; onClose: (
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-600">Função</label>
-            <div className="flex gap-2">
-              {(['waiter', 'cashier', 'kitchen'] as Role[]).map((r) => (
+            <div className="grid grid-cols-2 gap-2">
+              {SELECTABLE_ROLES.map((r) => (
                 <button
                   key={r}
                   onClick={() => setRole(r)}
-                  className={`flex-1 rounded-xl border py-2.5 text-sm font-medium transition ${
-                    role === r
-                      ? 'border-brand-500 bg-brand-50 text-brand-700'
-                      : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                  className={`rounded-xl border py-2.5 text-sm font-medium transition text-left px-3 ${
+                    role === r ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                   }`}
                 >
-                  {r === 'waiter' ? '🧑‍🍳 Garçom' : r === 'cashier' ? '💳 Caixa' : '👨‍🍳 Cozinha'}
+                  {roleIcons[r]} {ROLE_LABEL[r]}
                 </button>
               ))}
             </div>
-            <p className="mt-1.5 text-xs text-gray-400">
-              {{ waiter: 'Acessa: Mesas e Pedidos', cashier: 'Acessa: Caixa / PDV', kitchen: 'Acessa: apenas Cozinha + notificações' }[role]}
-            </p>
+            <p className="mt-1.5 text-xs text-gray-400">{ROLE_ACCESS[role]}</p>
           </div>
         </div>
 
@@ -118,40 +125,28 @@ export default function UsersPage() {
     try {
       if (u.disabled) await enableUser(u.uid)
       else            await disableUser(u.uid)
-    } finally {
-      setBusy(null)
-    }
+    } finally { setBusy(null) }
   }
 
   async function handleRoleChange(uid: string, role: Role) {
     await updateUserRole(uid, role)
   }
 
-  const sorted = [...users].sort((a, b) => {
-    const order: Record<Role, number> = { admin: 0, cashier: 1, waiter: 2, kitchen: 3 }
-    return order[a.role] - order[b.role]
-  })
+  const roleOrder: Record<Role, number> = { admin: 0, cashier: 1, waiter: 2, kitchen: 3, delivery: 4 }
+  const sorted = [...users].sort((a, b) => roleOrder[a.role] - roleOrder[b.role])
 
   return (
     <Layout>
       <PageHeader
         title="Usuários"
         subtitle={`${users.length} cadastrados · ${users.filter(u => !u.disabled).length} ativos`}
-        action={
-          <button onClick={() => setModal(true)} className="btn-primary text-sm">
-            + Novo usuário
-          </button>
-        }
+        action={<button onClick={() => setModal(true)} className="btn-primary text-sm">+ Novo usuário</button>}
       />
 
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
-
-        {/* Tabela */}
         <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white">
           {users.length === 0 ? (
-            <div className="flex h-32 items-center justify-center text-sm text-gray-400">
-              Nenhum usuário encontrado
-            </div>
+            <div className="flex h-32 items-center justify-center text-sm text-gray-400">Nenhum usuário encontrado</div>
           ) : (
             <table className="w-full">
               <thead>
@@ -173,9 +168,7 @@ export default function UsersPage() {
                         </div>
                         <div>
                           <p className="text-sm font-medium text-gray-800">{u.name}</p>
-                          {u.uid === me?.uid && (
-                            <p className="text-xs text-gray-400">você</p>
-                          )}
+                          {u.uid === me?.uid && <p className="text-xs text-gray-400">você</p>}
                         </div>
                       </div>
                     </td>
@@ -190,17 +183,15 @@ export default function UsersPage() {
                           onChange={(e) => handleRoleChange(u.uid, e.target.value as Role)}
                           className="rounded-lg border border-gray-200 px-2 py-1 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-500"
                         >
-                          <option value="waiter">Garçom</option>
-                          <option value="cashier">Caixa</option>
-                          <option value="kitchen">Cozinha</option>
+                          {SELECTABLE_ROLES.map((r) => (
+                            <option key={r} value={r}>{ROLE_LABEL[r]}</option>
+                          ))}
                         </select>
                       )}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-500 hidden sm:table-cell">{u.email}</td>
                     <td className="px-4 py-3">
-                      <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                        u.disabled ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'
-                      }`}>
+                      <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${u.disabled ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
                         {u.disabled ? 'Desabilitado' : 'Ativo'}
                       </span>
                     </td>
@@ -210,9 +201,7 @@ export default function UsersPage() {
                           onClick={() => toggleDisable(u)}
                           disabled={busy === u.uid}
                           className={`rounded-lg border px-3 py-1 text-xs transition disabled:opacity-50 ${
-                            u.disabled
-                              ? 'border-green-100 text-green-600 hover:bg-green-50'
-                              : 'border-red-100 text-red-500 hover:bg-red-50'
+                            u.disabled ? 'border-green-100 text-green-600 hover:bg-green-50' : 'border-red-100 text-red-500 hover:bg-red-50'
                           }`}
                         >
                           {busy === u.uid ? '…' : u.disabled ? 'Reativar' : 'Desabilitar'}
@@ -226,12 +215,10 @@ export default function UsersPage() {
           )}
         </div>
 
-        {/* Info */}
         <div className="rounded-xl bg-blue-50 px-4 py-3 text-sm text-blue-700">
           <strong>Sem custo extra:</strong> usuários são criados direto pelo Firebase Auth, sem Cloud Functions.
           Ao desabilitar, o acesso é bloqueado imediatamente no app.
         </div>
-
       </div>
 
       {showModal && restaurantId && (

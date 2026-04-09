@@ -4,10 +4,60 @@ import { getProductsByRestaurant } from "@/services/products"
 import { callWaiter, createOrder } from "@/services/orders"
 import { doc, getDoc } from "firebase/firestore"
 import { db } from "@/services/firebase"
-import type { Product, Restaurant } from "@/types"
+import type { Product, ProductSize, Restaurant } from "@/types"
 
 type View = "menu" | "cart" | "pix" | "success"
-type CartItem = { product: Product; qty: number }
+type CartItem = { product: Product; qty: number; size?: string; unitPrice: number }
+
+// Popup para selecionar tamanho
+function SizePickerModal({
+  product, primaryColor, onSelect, onClose,
+}: {
+  product: Product; primaryColor: string
+  onSelect: (size: ProductSize) => void; onClose: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={onClose}>
+      <div className="w-full max-w-md rounded-t-3xl bg-white p-6 pb-8" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-1 h-1 w-10 rounded-full bg-gray-200 mx-auto" />
+        <h3 className="mt-3 mb-1 text-base font-bold text-gray-800">{product.name}</h3>
+        <p className="mb-4 text-xs text-gray-500">Escolha o tamanho</p>
+        <div className="grid grid-cols-3 gap-3">
+          {product.sizes!.map((s) => {
+            const isOut = product.stock !== null && product.stock !== undefined && product.stock <= 0
+            return (
+              <button
+                key={s.label}
+                onClick={() => !isOut && onSelect(s)}
+                disabled={isOut}
+                className={`flex flex-col items-center rounded-2xl border-2 py-4 transition ${
+                  isOut ? 'border-gray-100 opacity-40' : 'border-gray-200 hover:border-gray-400 active:scale-95'
+                }`}
+              >
+                <span className="text-xl font-bold text-gray-800">{s.label}</span>
+                <span className="text-sm font-semibold mt-1" style={{ color: primaryColor }}>
+                  R$ {s.price.toFixed(2)}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+        <button onClick={onClose} className="mt-4 w-full rounded-xl border border-gray-200 py-2.5 text-sm text-gray-500">Cancelar</button>
+      </div>
+    </div>
+  )
+}
+
+// Popup de quantidade em estoque limitado
+function LowStockToast({ name, qty, onClose }: { name: string; qty: number; onClose: () => void }) {
+  useEffect(() => { const t = setTimeout(onClose, 3000); return () => clearTimeout(t) }, [onClose])
+  return (
+    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-2xl bg-amber-500 px-4 py-3 shadow-lg text-white text-sm font-medium max-w-xs w-full mx-4">
+      <span>⚠️</span>
+      <span>{name}: apenas {qty} unidade{qty !== 1 ? 's' : ''} disponível{qty !== 1 ? 'is' : ''}</span>
+    </div>
+  )
+}
 
 export default function CustomerMenuPage() {
   const { restaurantId, table } = useParams<{ restaurantId: string; table: string }>()
@@ -26,6 +76,8 @@ export default function CustomerMenuPage() {
   const [qrBase64, setQrBase64]             = useState("")
   const [pixTotal, setPixTotal]             = useState(0)
   const [pixPolling, setPixPolling]         = useState(false)
+  const [sizePicker, setSizePicker]         = useState<Product | null>(null)
+  const [stockToast, setStockToast]         = useState<{ name: string; qty: number } | null>(null)
 
   useEffect(() => {
     if (!restaurantId) return
@@ -41,27 +93,56 @@ export default function CustomerMenuPage() {
     })
   }, [restaurantId])
 
-  const categories   = [...new Set(products.map((p) => p.category))]
-  const byCategory   = products.reduce<Record<string, Product[]>>((acc, p) => {
-    acc[p.category] = [...(acc[p.category] ?? []), p]
-    return acc
+  const categories  = [...new Set(products.map((p) => p.category))]
+  const byCategory  = products.reduce<Record<string, Product[]>>((acc, p) => {
+    acc[p.category] = [...(acc[p.category] ?? []), p]; return acc
   }, {})
-  const cartTotal    = cart.reduce((s, i) => s + i.product.price * i.qty, 0)
-  const cartCount    = cart.reduce((s, i) => s + i.qty, 0)
-  const serviceRate  = restaurant?.serviceRate ?? 0.10
+  const cartTotal   = cart.reduce((s, i) => s + i.unitPrice * i.qty, 0)
+  const cartCount   = cart.reduce((s, i) => s + i.qty, 0)
+  const serviceRate = restaurant?.serviceRate ?? 0.10
   const totalWithFee = cartTotal * (1 + serviceRate)
+  const primaryColor = restaurant?.primaryColor ?? "#f97316"
 
-  function addToCart(product: Product) {
-    setCart((prev) => {
-      const ex = prev.find((i) => i.product.id === product.id)
-      if (ex) return prev.map((i) => i.product.id === product.id ? { ...i, qty: i.qty + 1 } : i)
-      return [...prev, { product, qty: 1 }]
+  function cartQtyForProduct(productId: string) {
+    return cart.filter(i => i.product.id === productId).reduce((s, i) => s + i.qty, 0)
+  }
+
+  function tryAddToCart(product: Product, size?: string, sizePrice?: number) {
+    const inCart = cartQtyForProduct(product.id)
+    const limit  = product.stock ?? Infinity
+    if (inCart >= limit) return  // esgotado
+
+    // Avisa quando pega o último ou chega em 5
+    if (product.stock !== null && product.stock !== undefined) {
+      const remaining = product.stock - inCart - 1
+      if (remaining <= 4 && remaining >= 0) {
+        setStockToast({ name: product.name, qty: remaining })
+      }
+    }
+
+    const unitPrice = sizePrice ?? product.price
+    const key       = `${product.id}__${size ?? ""}`
+    setCart(prev => {
+      const ex = prev.find(i => `${i.product.id}__${i.size ?? ""}` === key)
+      if (ex) return prev.map(i => `${i.product.id}__${i.size ?? ""}` === key ? { ...i, qty: i.qty + 1 } : i)
+      return [...prev, { product, qty: 1, size, unitPrice }]
     })
   }
 
-  function removeFromCart(productId: string) {
-    setCart((prev) =>
-      prev.map((i) => i.product.id === productId ? { ...i, qty: i.qty - 1 } : i).filter((i) => i.qty > 0),
+  function handleAddProduct(product: Product) {
+    if (product.stock !== null && product.stock !== undefined && product.stock <= 0) return
+    if ((product.sizes ?? []).length > 0) {
+      setSizePicker(product)
+    } else {
+      tryAddToCart(product)
+    }
+  }
+
+  function removeFromCart(productId: string, size?: string) {
+    const key = `${productId}__${size ?? ""}`
+    setCart(prev =>
+      prev.map(i => `${i.product.id}__${i.size ?? ""}` === key ? { ...i, qty: i.qty - 1 } : i)
+          .filter(i => i.qty > 0)
     )
   }
 
@@ -77,31 +158,24 @@ export default function CustomerMenuPage() {
     setSending(true)
     try {
       const orderId = await createOrder(
-        restaurantId,
-        tableNumber,
+        restaurantId, tableNumber,
         cart.map((i) => ({
           productId: i.product.id,
-          name:      i.product.name,
+          name:      i.size ? `${i.product.name} (${i.size})` : i.product.name,
           qty:       i.qty,
-          price:     i.product.price,
+          price:     i.unitPrice,
+          ...(i.size ? { size: i.size } : {}),
         })),
       )
       setCurrentOrderId(orderId)
-      // Gera PIX
       const { httpsCallable } = await import("firebase/functions")
       const { functions }     = await import("@/services/firebase")
       const fn  = httpsCallable(functions, "createPixPayment")
       const res = await fn({ orderId, restaurantId }) as { data: { qrCode: string; qrCodeBase64: string; total: number } }
-      setQrCode(res.data.qrCode)
-      setQrBase64(res.data.qrCodeBase64)
-      setPixTotal(res.data.total)
-      setView("pix")
-      startPixPolling(orderId)
-    } catch {
-      alert("Erro ao enviar pedido. Tente novamente.")
-    } finally {
-      setSending(false)
-    }
+      setQrCode(res.data.qrCode); setQrBase64(res.data.qrCodeBase64); setPixTotal(res.data.total)
+      setView("pix"); startPixPolling(orderId)
+    } catch { alert("Erro ao enviar pedido. Tente novamente.") }
+    finally   { setSending(false) }
   }
 
   function startPixPolling(orderId: string) {
@@ -111,19 +185,9 @@ export default function CustomerMenuPage() {
       const { functions }     = await import("@/services/firebase")
       const fn  = httpsCallable(functions, "checkPaymentStatus")
       const res = await fn({ orderId }) as { data: { paymentStatus: string } }
-      if (res.data.paymentStatus === "approved") {
-        clearInterval(interval)
-        setPixPolling(false)
-        setView("success")
-      }
+      if (res.data.paymentStatus === "approved") { clearInterval(interval); setPixPolling(false); setView("success") }
     }, 5000)
   }
-
-  function copyPix() {
-    navigator.clipboard.writeText(qrCode)
-  }
-
-  const primaryColor = restaurant?.primaryColor ?? "#f97316"
 
   if (loading) return (
     <div className="flex min-h-screen items-center justify-center">
@@ -131,35 +195,23 @@ export default function CustomerMenuPage() {
     </div>
   )
 
-  // ─── Tela de sucesso ───────────────────────────────────────────────────────
   if (view === "success") return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-gray-50 p-6">
       <div className="flex h-20 w-20 items-center justify-center rounded-full bg-green-100 text-4xl">✅</div>
       <h2 className="text-xl font-bold text-gray-800">Pagamento confirmado!</h2>
-      <p className="text-center text-sm text-gray-500">
-        Obrigado! Seu pedido foi recebido e será preparado em breve.
-      </p>
-      <button
-        onClick={() => { setCart([]); setView("menu") }}
-        className="mt-4 rounded-xl px-6 py-3 text-sm font-semibold text-white"
-        style={{ background: primaryColor }}
-      >
+      <p className="text-center text-sm text-gray-500">Seu pedido foi recebido e será preparado em breve.</p>
+      <button onClick={() => { setCart([]); setView("menu") }} className="mt-4 rounded-xl px-6 py-3 text-sm font-semibold text-white" style={{ background: primaryColor }}>
         Fazer novo pedido
       </button>
     </div>
   )
 
-  // ─── Tela PIX ──────────────────────────────────────────────────────────────
   if (view === "pix") return (
     <div className="flex min-h-screen flex-col bg-gray-50">
       <div className="flex items-center gap-3 bg-white px-4 py-4 shadow-sm">
         <button onClick={() => setView("cart")} className="text-gray-400 text-xl">←</button>
-        <div>
-          <p className="font-semibold text-gray-800">{restaurant?.name}</p>
-          <p className="text-xs text-gray-500">Mesa {tableNumber} — Pagar com PIX</p>
-        </div>
+        <div><p className="font-semibold text-gray-800">{restaurant?.name}</p><p className="text-xs text-gray-500">Mesa {tableNumber} — Pagar com PIX</p></div>
       </div>
-
       <div className="flex flex-1 flex-col items-center gap-5 p-6">
         <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-sm">
           <div className="mb-4 text-center">
@@ -167,66 +219,53 @@ export default function CustomerMenuPage() {
             <p className="text-3xl font-bold text-gray-800">R$ {pixTotal.toFixed(2)}</p>
             <p className="text-xs text-gray-400">Inclui {(serviceRate * 100).toFixed(0)}% taxa de serviço</p>
           </div>
-
           {qrBase64 ? (
             <div className="flex justify-center mb-4">
               <img src={`data:image/png;base64,${qrBase64}`} alt="QR PIX" className="h-52 w-52 rounded-xl border border-gray-100" />
             </div>
           ) : (
-            <div className="mb-4 flex h-52 items-center justify-center rounded-xl bg-gray-50 text-sm text-gray-400">
-              Gerando QR Code…
-            </div>
+            <div className="mb-4 flex h-52 items-center justify-center rounded-xl bg-gray-50 text-sm text-gray-400">Gerando QR Code…</div>
           )}
-
           <div className="mb-4">
             <p className="mb-1.5 text-xs font-medium text-gray-500">Pix Copia e Cola</p>
             <div className="flex gap-2">
               <input readOnly value={qrCode} className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-600 truncate" />
-              <button onClick={copyPix} className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 whitespace-nowrap">Copiar</button>
+              <button onClick={() => navigator.clipboard.writeText(qrCode)} className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 whitespace-nowrap">Copiar</button>
             </div>
           </div>
-
-          {pixPolling && (
-            <div className="flex items-center justify-center gap-2 text-xs text-gray-400">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
-              Aguardando confirmação…
-            </div>
-          )}
+          {pixPolling && <div className="flex items-center justify-center gap-2 text-xs text-gray-400"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />Aguardando confirmação…</div>}
         </div>
       </div>
     </div>
   )
 
-  // ─── Tela carrinho ─────────────────────────────────────────────────────────
   if (view === "cart") return (
     <div className="flex min-h-screen flex-col bg-gray-50">
       <div className="flex items-center gap-3 bg-white px-4 py-4 shadow-sm">
         <button onClick={() => setView("menu")} className="text-gray-400 text-xl">←</button>
         <p className="font-semibold text-gray-800">Seu pedido</p>
       </div>
-
       <div className="flex-1 p-4">
         {cart.length === 0 ? (
           <div className="flex h-40 items-center justify-center text-sm text-gray-400">Carrinho vazio</div>
         ) : (
           <div className="space-y-2">
-            {cart.map((item) => (
-              <div key={item.product.id} className="flex items-center justify-between rounded-xl bg-white px-4 py-3 shadow-sm">
+            {cart.map((item, idx) => (
+              <div key={idx} className="flex items-center justify-between rounded-xl bg-white px-4 py-3 shadow-sm">
                 <div>
-                  <p className="text-sm font-medium text-gray-800">{item.product.name}</p>
-                  <p className="text-xs text-gray-500">R$ {item.product.price.toFixed(2)}</p>
+                  <p className="text-sm font-medium text-gray-800">{item.product.name}{item.size ? ` (${item.size})` : ""}</p>
+                  <p className="text-xs text-gray-500">R$ {item.unitPrice.toFixed(2)}</p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <button onClick={() => removeFromCart(item.product.id)} className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-100 text-gray-600">−</button>
+                  <button onClick={() => removeFromCart(item.product.id, item.size)} className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-100 text-gray-600">−</button>
                   <span className="text-sm font-semibold w-4 text-center">{item.qty}</span>
-                  <button onClick={() => addToCart(item.product)} className="flex h-7 w-7 items-center justify-center rounded-full text-white" style={{ background: primaryColor }}>+</button>
+                  <button onClick={() => tryAddToCart(item.product, item.size, item.unitPrice)} className="flex h-7 w-7 items-center justify-center rounded-full text-white" style={{ background: primaryColor }}>+</button>
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
-
       {cart.length > 0 && (
         <div className="border-t border-gray-100 bg-white p-4">
           <div className="mb-3 space-y-1">
@@ -234,12 +273,7 @@ export default function CustomerMenuPage() {
             <div className="flex justify-between text-sm text-gray-600"><span>Taxa serviço ({(serviceRate * 100).toFixed(0)}%)</span><span>R$ {(cartTotal * serviceRate).toFixed(2)}</span></div>
             <div className="flex justify-between font-semibold text-gray-800"><span>Total</span><span>R$ {totalWithFee.toFixed(2)}</span></div>
           </div>
-          <button
-            onClick={handleSendOrder}
-            disabled={sending}
-            className="w-full rounded-xl py-3 text-sm font-semibold text-white disabled:opacity-60"
-            style={{ background: primaryColor }}
-          >
+          <button onClick={handleSendOrder} disabled={sending} className="w-full rounded-xl py-3 text-sm font-semibold text-white disabled:opacity-60" style={{ background: primaryColor }}>
             {sending ? "Processando…" : "Confirmar e pagar com PIX"}
           </button>
         </div>
@@ -247,68 +281,69 @@ export default function CustomerMenuPage() {
     </div>
   )
 
-  // ─── Tela cardápio (principal) ────────────────────────────────────────────
+  // ─── Cardápio principal ──────────────────────────────────────────────────
   return (
     <div className="flex min-h-screen flex-col bg-gray-50">
-      {/* Header */}
+      {stockToast && <LowStockToast name={stockToast.name} qty={stockToast.qty} onClose={() => setStockToast(null)} />}
+
       <div className="bg-white px-4 pb-3 pt-5 shadow-sm">
         <div className="mb-1 flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl text-white text-sm font-bold" style={{ background: primaryColor }}>
             {restaurant?.name?.charAt(0)}
           </div>
-          <div>
-            <p className="font-semibold text-gray-800">{restaurant?.name}</p>
-            <p className="text-xs text-gray-500">Mesa {tableNumber}</p>
-          </div>
+          <div><p className="font-semibold text-gray-800">{restaurant?.name}</p><p className="text-xs text-gray-500">Mesa {tableNumber}</p></div>
         </div>
-
-        {/* Categorias */}
         <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
           {categories.map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
-              className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-medium transition ${
-                activeCategory === cat ? "text-white" : "bg-gray-100 text-gray-600"
-              }`}
-              style={activeCategory === cat ? { background: primaryColor } : {}}
-            >
+            <button key={cat} onClick={() => setActiveCategory(cat)}
+              className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-medium transition ${activeCategory === cat ? "text-white" : "bg-gray-100 text-gray-600"}`}
+              style={activeCategory === cat ? { background: primaryColor } : {}}>
               {cat}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Produtos */}
       <div className="flex-1 overflow-y-auto p-4 pb-32">
         <div className="space-y-3">
           {(byCategory[activeCategory] ?? []).map((product) => {
-            const item = cart.find((i) => i.product.id === product.id)
+            const inCart   = cartQtyForProduct(product.id)
+            const isOut    = product.stock !== null && product.stock !== undefined && product.stock <= 0
+            const lowStock = product.stock !== null && product.stock !== undefined && product.stock > 0 && product.stock <= 5
+            const hasSizes = (product.sizes ?? []).length > 0
+
             return (
-              <div key={product.id} className="flex items-center gap-3 rounded-2xl bg-white p-4 shadow-sm">
+              <div key={product.id} className={`flex items-start gap-3 rounded-2xl bg-white p-4 shadow-sm ${isOut ? 'opacity-50' : ''}`}>
                 {product.image ? (
-                  <img src={product.image} alt={product.name} className="h-16 w-16 rounded-xl object-cover" />
+                  <img src={product.image} alt={product.name} className="h-16 w-16 rounded-xl object-cover shrink-0" />
                 ) : (
-                  <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-gray-100 text-2xl">🍽️</div>
+                  <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-gray-100 text-2xl shrink-0">🍽️</div>
                 )}
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <p className="font-medium text-gray-800">{product.name}</p>
-                  <p className="text-sm font-semibold text-gray-700">R$ {product.price.toFixed(2)}</p>
+                  {product.description && (
+                    <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{product.description}</p>
+                  )}
+                  {hasSizes ? (
+                    <p className="text-xs text-gray-400 mt-0.5">{product.sizes!.map(s => `${s.label} R$${s.price.toFixed(2)}`).join(' · ')}</p>
+                  ) : (
+                    <p className="text-sm font-semibold text-gray-700 mt-0.5">R$ {product.price.toFixed(2)}</p>
+                  )}
+                  {isOut && <span className="text-xs text-red-500 font-medium">Esgotado</span>}
+                  {lowStock && !isOut && (
+                    <span className="text-xs text-amber-500">⚠ últimas {product.stock} unidades</span>
+                  )}
                 </div>
-                <div className="flex items-center gap-2">
-                  {item && (
+                <div className="flex items-center gap-2 shrink-0">
+                  {!isOut && !hasSizes && inCart > 0 && (
                     <>
                       <button onClick={() => removeFromCart(product.id)} className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-gray-600">−</button>
-                      <span className="w-4 text-center text-sm font-semibold">{item.qty}</span>
+                      <span className="w-4 text-center text-sm font-semibold">{inCart}</span>
                     </>
                   )}
-                  <button
-                    onClick={() => addToCart(product)}
-                    className="flex h-8 w-8 items-center justify-center rounded-full text-white"
-                    style={{ background: primaryColor }}
-                  >
-                    +
-                  </button>
+                  {!isOut && (
+                    <button onClick={() => handleAddProduct(product)} className="flex h-8 w-8 items-center justify-center rounded-full text-white" style={{ background: primaryColor }}>+</button>
+                  )}
                 </div>
               </div>
             )
@@ -316,27 +351,27 @@ export default function CustomerMenuPage() {
         </div>
       </div>
 
-      {/* Bottom bar */}
       <div className="fixed bottom-0 left-0 right-0 border-t border-gray-100 bg-white px-4 py-3">
         <div className="flex gap-3">
-          <button
-            onClick={handleCallWaiter}
-            disabled={calledWaiter}
-            className="flex-1 rounded-xl border border-gray-200 py-3 text-xs font-medium text-gray-600 disabled:opacity-50"
-          >
+          <button onClick={handleCallWaiter} disabled={calledWaiter} className="flex-1 rounded-xl border border-gray-200 py-3 text-xs font-medium text-gray-600 disabled:opacity-50">
             {calledWaiter ? "✅ Garçom chamado" : "🔔 Chamar garçom"}
           </button>
           {cartCount > 0 && (
-            <button
-              onClick={() => setView("cart")}
-              className="flex-1 rounded-xl py-3 text-xs font-semibold text-white"
-              style={{ background: primaryColor }}
-            >
+            <button onClick={() => setView("cart")} className="flex-1 rounded-xl py-3 text-xs font-semibold text-white" style={{ background: primaryColor }}>
               Ver pedido ({cartCount}) · R$ {cartTotal.toFixed(2)}
             </button>
           )}
         </div>
       </div>
+
+      {sizePicker && (
+        <SizePickerModal
+          product={sizePicker}
+          primaryColor={primaryColor}
+          onSelect={(s) => { tryAddToCart(sizePicker, s.label, s.price); setSizePicker(null) }}
+          onClose={() => setSizePicker(null)}
+        />
+      )}
     </div>
   )
 }

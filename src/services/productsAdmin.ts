@@ -1,6 +1,6 @@
 import {
   collection, doc, addDoc, updateDoc, deleteDoc,
-  query, where, onSnapshot, type Unsubscribe,
+  query, where, onSnapshot, increment, type Unsubscribe,
 } from 'firebase/firestore'
 import { db } from './firebase'
 import type { Product, ProductCategory } from '@/types'
@@ -16,7 +16,11 @@ export function subscribeAllProducts(
 }
 
 export async function createProduct(data: Omit<Product, 'id'>): Promise<string> {
-  const ref = await addDoc(collection(db, 'products'), data)
+  const ref = await addDoc(collection(db, 'products'), {
+    ...data,
+    stock: data.stock ?? null,
+    sizes: data.sizes ?? [],
+  })
   return ref.id
 }
 
@@ -32,6 +36,13 @@ export async function toggleProductActive(id: string, active: boolean): Promise<
   await updateDoc(doc(db, 'products', id), { active })
 }
 
+// Decrementa estoque quando item é pedido
+export async function decrementProductStock(productId: string, qty: number) {
+  await updateDoc(doc(db, 'products', productId), {
+    stock: increment(-qty),
+  })
+}
+
 export const CATEGORIES: ProductCategory[] = [
-  'Hambúrguer', 'Bebidas', 'Porções', 'Sobremesa', 'Outros',
+  'Hambúrguer', 'Bebidas', 'Porções', 'Sobremesa', 'Prato do Dia', 'Outros',
 ]

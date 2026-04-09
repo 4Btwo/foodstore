@@ -25,9 +25,15 @@ export function subscribeTables(
     where('restaurantId', '==', restaurantId),
     orderBy('number'),
   )
-  return onSnapshot(q, (snap) => {
-    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Table))
-  })
+  return onSnapshot(
+    q,
+    (snap) => {
+      callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Table))
+    },
+    (error) => {
+      console.warn('Tables listener error (index may still be building):', error.message)
+    },
+  )
 }
 
 export async function updateTableStatus(tableId: string, status: TableStatus) {
@@ -68,15 +74,21 @@ export function subscribeOrders(
         orderBy('createdAt', 'desc'),
       )
 
-  return onSnapshot(q, (snap) => {
-    callback(
-      snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-        createdAt: (d.data().createdAt as Timestamp).toDate(),
-      }) as Order),
-    )
-  })
+  return onSnapshot(
+    q,
+    (snap) => {
+      callback(
+        snap.docs.map((d) => ({
+          id: d.id,
+          ...d.data(),
+          createdAt: (d.data().createdAt as Timestamp).toDate(),
+        }) as Order),
+      )
+    },
+    (error) => {
+      console.warn('Orders listener error (index may still be building):', error.message)
+    },
+  )
 }
 
 export async function createOrder(
@@ -141,9 +153,15 @@ export function subscribeOrderItems(
   callback: (items: OrderItem[]) => void,
 ): Unsubscribe {
   const q = query(collection(db, 'order_items'), where('orderId', '==', orderId))
-  return onSnapshot(q, (snap) => {
-    callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as OrderItem))
-  })
+  return onSnapshot(
+    q,
+    (snap) => {
+      callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as OrderItem))
+    },
+    (error) => {
+      console.warn('OrderItems listener error:', error.message)
+    },
+  )
 }
 
 // ─── Table Calls ─────────────────────────────────────────────────────────────

@@ -1,0 +1,481 @@
+import { useState, useEffect } from 'react'
+import { signOut } from '@/services/auth'
+import { useNavigate } from 'react-router-dom'
+import {
+  subscribeAllRestaurants, subscribeUsersByRestaurant,
+  createRestaurant, updateRestaurantById, deleteRestaurantById,
+  createUserForRestaurant, updateUserById, deleteUserById,
+  ALL_MODULES, DEFAULT_MODULES,
+} from '@/services/superAdmin'
+import type { Restaurant, AppUser, Role, AppModule } from '@/types'
+
+const ROLE_LABEL: Record<Role, string> = {
+  superadmin: '👑 Super Admin',
+  admin:      '🔑 Admin',
+  cashier:    '💳 Caixa',
+  waiter:     '🧑‍🍳 Garçom',
+  kitchen:    '👨‍🍳 Cozinha',
+  delivery:   '🛵 Entregador',
+}
+
+const ROLE_COLOR: Record<Role, string> = {
+  superadmin: 'bg-yellow-100 text-yellow-800',
+  admin:      'bg-purple-100 text-purple-700',
+  cashier:    'bg-blue-100 text-blue-700',
+  waiter:     'bg-amber-100 text-amber-700',
+  kitchen:    'bg-green-100 text-green-700',
+  delivery:   'bg-orange-100 text-orange-700',
+}
+
+const SUB_ROLES: Role[] = ['admin', 'cashier', 'waiter', 'kitchen', 'delivery']
+
+// ─── Modal: Novo Restaurante ──────────────────────────────────────────────────
+function NewRestaurantModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
+  const [name, setName]       = useState('')
+  const [color, setColor]     = useState('#f97316')
+  const [rate, setRate]       = useState(10)
+  const [saving, setSaving]   = useState(false)
+  const [error, setError]     = useState('')
+
+  async function handleSave() {
+    if (!name.trim()) { setError('Nome obrigatório'); return }
+    setSaving(true); setError('')
+    try {
+      const id = await createRestaurant({ name: name.trim(), primaryColor: color, serviceRate: rate })
+      onCreated(id)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao criar')
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <Modal title="Novo Restaurante" onClose={onClose}>
+      {error && <ErrorBox msg={error} />}
+      <Field label="Nome do restaurante *">
+        <input className="sa-input" value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Burger House" />
+      </Field>
+      <Field label="Cor principal">
+        <div className="flex gap-3 items-center">
+          <input type="color" value={color} onChange={e => setColor(e.target.value)} className="h-10 w-14 rounded-lg border border-gray-200 p-0.5 cursor-pointer" />
+          <input className="sa-input flex-1 font-mono" value={color} onChange={e => setColor(e.target.value)} maxLength={7} />
+        </div>
+      </Field>
+      <Field label={`Taxa de serviço: ${rate}%`}>
+        <input type="range" min={0} max={20} step={1} value={rate} onChange={e => setRate(Number(e.target.value))} className="w-full" />
+      </Field>
+      <ModalFooter onClose={onClose} onSave={handleSave} saving={saving} label="Criar restaurante" />
+    </Modal>
+  )
+}
+
+// ─── Modal: Novo Usuário ──────────────────────────────────────────────────────
+function NewUserModal({ restaurantId, restaurantName, onClose }: {
+  restaurantId: string; restaurantName: string; onClose: () => void
+}) {
+  const [name, setName]         = useState('')
+  const [email, setEmail]       = useState('')
+  const [password, setPassword] = useState('')
+  const [role, setRole]         = useState<Role>('waiter')
+  const [saving, setSaving]     = useState(false)
+  const [error, setError]       = useState('')
+
+  async function handleSave() {
+    if (!name.trim() || !email.trim() || password.length < 6) {
+      setError('Preencha todos os campos (senha mín. 6 caracteres)'); return
+    }
+    setSaving(true); setError('')
+    try {
+      await createUserForRestaurant({ name, email, password, role, restaurantId })
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro')
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <Modal title={`Novo usuário — ${restaurantName}`} onClose={onClose}>
+      {error && <ErrorBox msg={error} />}
+      <Field label="Nome completo *">
+        <input className="sa-input" value={name} onChange={e => setName(e.target.value)} placeholder="Nome do usuário" />
+      </Field>
+      <Field label="E-mail *">
+        <input className="sa-input" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="usuario@email.com" />
+      </Field>
+      <Field label="Senha *">
+        <input className="sa-input" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Mín. 6 caracteres" />
+      </Field>
+      <Field label="Função">
+        <div className="grid grid-cols-2 gap-2">
+          {SUB_ROLES.map(r => (
+            <button key={r} onClick={() => setRole(r)}
+              className={`rounded-xl border px-3 py-2.5 text-sm font-medium transition text-left ${
+                role === r ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}>
+              {ROLE_LABEL[r]}
+            </button>
+          ))}
+        </div>
+      </Field>
+      <ModalFooter onClose={onClose} onSave={handleSave} saving={saving} label="Criar usuário" />
+    </Modal>
+  )
+}
+
+// ─── Modal: Permissões do usuário ──────────────────────────────────────────────
+function PermissionsModal({ user, onClose }: { user: AppUser; onClose: () => void }) {
+  const defaultMods  = DEFAULT_MODULES[user.role] ?? []
+  const currentMods  = user.visibleModules ?? defaultMods
+  const [selected, setSelected] = useState<Set<AppModule>>(new Set(currentMods))
+  const [saving, setSaving]     = useState(false)
+
+  function toggle(mod: AppModule) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.has(mod) ? next.delete(mod) : next.add(mod)
+      return next
+    })
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    await updateUserById(user.uid, { visibleModules: Array.from(selected) })
+    setSaving(false)
+    onClose()
+  }
+
+  function resetToDefault() {
+    setSelected(new Set(DEFAULT_MODULES[user.role] ?? []))
+  }
+
+  return (
+    <Modal title={`Permissões — ${user.name}`} onClose={onClose}>
+      <p className="mb-3 text-xs text-gray-500">Defina quais módulos este usuário pode acessar no menu lateral.</p>
+      <button onClick={resetToDefault} className="mb-4 text-xs text-indigo-600 hover:underline">↺ Restaurar padrão da função ({ROLE_LABEL[user.role]})</button>
+      <div className="grid grid-cols-2 gap-2">
+        {ALL_MODULES.map(({ key, label, icon }) => {
+          const on = selected.has(key)
+          return (
+            <button key={key} onClick={() => toggle(key)}
+              className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition ${
+                on ? 'border-indigo-400 bg-indigo-50 text-indigo-700' : 'border-gray-100 text-gray-400 hover:bg-gray-50'
+              }`}>
+              <span>{icon}</span>
+              <span className="text-xs">{label}</span>
+              <span className={`ml-auto h-4 w-4 rounded-full border-2 ${on ? 'border-indigo-500 bg-indigo-500' : 'border-gray-300'}`} />
+            </button>
+          )
+        })}
+      </div>
+      <ModalFooter onClose={onClose} onSave={handleSave} saving={saving} label="Salvar permissões" />
+    </Modal>
+  )
+}
+
+// ─── Card de restaurante com usuários ─────────────────────────────────────────
+function RestaurantCard({
+  restaurant, expanded, onToggle, onAddUser, onDeleteRestaurant,
+}: {
+  restaurant: Restaurant
+  expanded: boolean
+  onToggle: () => void
+  onAddUser: () => void
+  onDeleteRestaurant: () => void
+}) {
+  const [users, setUsers]         = useState<AppUser[]>([])
+  const [permUser, setPermUser]   = useState<AppUser | null>(null)
+
+  useEffect(() => {
+    if (!expanded) return
+    return subscribeUsersByRestaurant(restaurant.id, setUsers)
+  }, [expanded, restaurant.id])
+
+  async function handleDeleteUser(u: AppUser) {
+    if (!confirm(`Excluir usuário "${u.name}"? Esta ação não pode ser desfeita.`)) return
+    await deleteUserById(u.uid)
+  }
+
+  async function handleToggleDisable(u: AppUser) {
+    await updateUserById(u.uid, { disabled: !u.disabled })
+  }
+
+  async function handleRoleChange(u: AppUser, role: Role) {
+    await updateUserById(u.uid, { role })
+  }
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+      {/* Header do restaurante */}
+      <div className="flex items-center gap-4 px-5 py-4">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg font-black text-white shadow-sm"
+          style={{ background: restaurant.primaryColor }}>
+          {restaurant.name.charAt(0)}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-bold text-gray-900">{restaurant.name}</p>
+          <p className="text-xs text-gray-400">ID: <span className="font-mono select-all">{restaurant.id}</span> · Taxa: {(restaurant.serviceRate * 100).toFixed(0)}% · <span style={{color: restaurant.primaryColor}}>●</span> cor</p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+          <button
+            onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/pedido/${restaurant.id}`); alert('Link copiado!') }}
+            className="rounded-xl border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50"
+            title="Copiar link de pedidos online"
+          >
+            🔗 Link
+          </button>
+          <button onClick={onAddUser}
+            className="rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700">
+            + Usuário
+          </button>
+          <button onClick={onDeleteRestaurant}
+            className="rounded-xl border border-red-200 px-3 py-1.5 text-xs font-bold text-red-500 hover:bg-red-50">
+            🗑
+          </button>
+          <button onClick={onToggle}
+            className="rounded-xl border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50">
+            {expanded ? '▲ Fechar' : '▼ Usuários'}
+          </button>
+        </div>
+      </div>
+
+      {/* Tabela de usuários */}
+      {expanded && (
+        <div className="border-t border-gray-100">
+          {users.length === 0 ? (
+            <div className="flex items-center justify-center py-8 text-sm text-gray-400">
+              Nenhum usuário neste restaurante
+            </div>
+          ) : (
+            <table className="w-full">
+              <thead>
+                <tr className="bg-gray-50">
+                  <th className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wide text-gray-400">Usuário</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wide text-gray-400">Função</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wide text-gray-400 hidden sm:table-cell">Status</th>
+                  <th className="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wide text-gray-400">Ações</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {users.map(u => (
+                  <tr key={u.uid} className="hover:bg-gray-50 transition">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-bold text-gray-600">
+                          {u.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-800 truncate">{u.name}</p>
+                          <p className="text-xs text-gray-400 truncate">{u.email}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      {u.role === 'admin' || u.role === 'superadmin' ? (
+                        <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${ROLE_COLOR[u.role]}`}>
+                          {ROLE_LABEL[u.role]}
+                        </span>
+                      ) : (
+                        <select value={u.role}
+                          onChange={e => handleRoleChange(u, e.target.value as Role)}
+                          className="rounded-lg border border-gray-200 px-2 py-1 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                          {SUB_ROLES.map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+                        </select>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 hidden sm:table-cell">
+                      <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${u.disabled ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-700'}`}>
+                        {u.disabled ? 'Desabilitado' : 'Ativo'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button onClick={() => setPermUser(u)}
+                          className="rounded-lg border border-indigo-200 px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50"
+                          title="Permissões">
+                          🔒 Módulos
+                        </button>
+                        <button onClick={() => handleToggleDisable(u)}
+                          className={`rounded-lg border px-2 py-1 text-xs font-medium transition ${
+                            u.disabled ? 'border-green-200 text-green-600 hover:bg-green-50' : 'border-amber-200 text-amber-600 hover:bg-amber-50'
+                          }`}>
+                          {u.disabled ? 'Ativar' : 'Pausar'}
+                        </button>
+                        <button onClick={() => handleDeleteUser(u)}
+                          className="rounded-lg border border-red-100 px-2 py-1 text-xs text-red-400 hover:bg-red-50">
+                          🗑
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+      {permUser && <PermissionsModal user={permUser} onClose={() => setPermUser(null)} />}
+    </div>
+  )
+}
+
+// ─── Componentes utilitários ──────────────────────────────────────────────────
+function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="mb-5 flex items-center justify-between">
+          <h2 className="text-base font-bold text-gray-900">{title}</h2>
+          <button onClick={onClose} className="text-xl text-gray-400 hover:text-gray-600">✕</button>
+        </div>
+        <div className="space-y-4">{children}</div>
+      </div>
+    </div>
+  )
+}
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div><label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">{label}</label>{children}</div>
+}
+function ErrorBox({ msg }: { msg: string }) {
+  return <div className="rounded-xl bg-red-50 px-4 py-2.5 text-sm text-red-600">{msg}</div>
+}
+function ModalFooter({ onClose, onSave, saving, label }: { onClose: () => void; onSave: () => void; saving: boolean; label: string }) {
+  return (
+    <div className="mt-2 flex gap-2 pt-2">
+      <button onClick={onClose} className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50">Cancelar</button>
+      <button onClick={onSave} disabled={saving} className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50">
+        {saving ? 'Salvando…' : label}
+      </button>
+    </div>
+  )
+}
+
+// ─── Página principal ─────────────────────────────────────────────────────────
+export default function SuperAdminPage() {
+  const navigate = useNavigate()
+  const [restaurants, setRestaurants] = useState<Restaurant[]>([])
+  const [loading, setLoading]         = useState(true)
+  const [expanded, setExpanded]       = useState<string | null>(null)
+  const [newRestModal, setNewRestModal] = useState(false)
+  const [newUserFor, setNewUserFor]    = useState<Restaurant | null>(null)
+  const [search, setSearch]           = useState('')
+
+  useEffect(() => {
+    return subscribeAllRestaurants((list) => {
+      setRestaurants(list.sort((a, b) => a.name.localeCompare(b.name)))
+      setLoading(false)
+    })
+  }, [])
+
+  async function handleDeleteRestaurant(r: Restaurant) {
+    if (!confirm(`Excluir restaurante "${r.name}"?\n\nATENÇÃO: Os usuários vinculados NÃO serão excluídos automaticamente.`)) return
+    await deleteRestaurantById(r.id)
+  }
+
+  const filtered = restaurants.filter(r =>
+    r.name.toLowerCase().includes(search.toLowerCase()) ||
+    r.id.toLowerCase().includes(search.toLowerCase())
+  )
+
+  return (
+    <div className="min-h-screen bg-gray-950 text-white">
+      {/* Topbar */}
+      <header className="sticky top-0 z-20 flex items-center justify-between border-b border-gray-800 bg-gray-900 px-6 py-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-yellow-500 text-sm font-black text-gray-900">
+            👑
+          </div>
+          <div>
+            <p className="font-black text-white">Super Admin</p>
+            <p className="text-xs text-gray-400">Controle total da plataforma</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="hidden sm:block text-xs text-gray-500">FoodStore Platform</span>
+          <button
+            onClick={async () => { await signOut(); navigate('/login') }}
+            className="rounded-xl border border-gray-700 px-4 py-2 text-xs text-gray-400 hover:bg-gray-800"
+          >
+            Sair
+          </button>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-5xl px-4 py-6">
+        {/* Stats */}
+        <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div className="rounded-2xl bg-gray-800 p-4">
+            <p className="text-2xl font-black text-white">{restaurants.length}</p>
+            <p className="text-xs text-gray-400">Restaurantes</p>
+          </div>
+          <div className="rounded-2xl bg-gray-800 p-4">
+            <p className="text-2xl font-black text-yellow-400">Ativo</p>
+            <p className="text-xs text-gray-400">Status da plataforma</p>
+          </div>
+          <div className="col-span-2 sm:col-span-1 rounded-2xl bg-indigo-900/60 border border-indigo-700 p-4">
+            <p className="text-2xl font-black text-indigo-300">Full</p>
+            <p className="text-xs text-indigo-400">Nível de acesso</p>
+          </div>
+        </div>
+
+        {/* Barra de ações */}
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="🔍 Buscar restaurante…"
+            className="rounded-xl border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm text-white placeholder-gray-500 outline-none focus:border-indigo-500 sm:w-64"
+          />
+          <button
+            onClick={() => setNewRestModal(true)}
+            className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-indigo-700"
+          >
+            + Novo restaurante
+          </button>
+        </div>
+
+        {/* Lista de restaurantes */}
+        {loading ? (
+          <div className="flex justify-center py-20">
+            <div className="h-10 w-10 animate-spin rounded-full border-4 border-indigo-500 border-t-transparent" />
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-20 text-gray-500">
+            <span className="text-5xl">🏪</span>
+            <p className="text-sm">{search ? 'Nenhum restaurante encontrado' : 'Nenhum restaurante cadastrado'}</p>
+            {!search && (
+              <button onClick={() => setNewRestModal(true)} className="mt-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-indigo-700">
+                Criar primeiro restaurante
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {filtered.map(r => (
+              <RestaurantCard
+                key={r.id}
+                restaurant={r}
+                expanded={expanded === r.id}
+                onToggle={() => setExpanded(expanded === r.id ? null : r.id)}
+                onAddUser={() => setNewUserFor(r)}
+                onDeleteRestaurant={() => handleDeleteRestaurant(r)}
+              />
+            ))}
+          </div>
+        )}
+      </main>
+
+      {newRestModal && (
+        <NewRestaurantModal
+          onClose={() => setNewRestModal(false)}
+          onCreated={(id) => { setNewRestModal(false); setExpanded(id) }}
+        />
+      )}
+      {newUserFor && (
+        <NewUserModal
+          restaurantId={newUserFor.id}
+          restaurantName={newUserFor.name}
+          onClose={() => setNewUserFor(null)}
+        />
+      )}
+    </div>
+  )
+}
