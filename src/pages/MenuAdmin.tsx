@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Layout, PageHeader } from '@/components/Layout'
+import { ImageUploader } from '@/components/ImageUploader'
 import { useAuth } from '@/hooks/useAuth'
 import {
   subscribeAllProducts, createProduct, updateProduct,
@@ -209,14 +210,14 @@ function ProductModal({
             )}
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">URL da imagem (opcional)</label>
-            <input className="input" value={form.image} onChange={(e) => set('image', e.target.value)} placeholder="https://..." />
-            {form.image && (
-              <img src={form.image} alt="" className="mt-2 h-16 w-16 rounded-xl object-cover border border-gray-100"
-                onError={(e) => (e.currentTarget.style.display = 'none')} />
-            )}
-          </div>
+          <ImageUploader
+            label="Imagem do produto"
+            value={form.image}
+            storagePath={`restaurants/${restaurantId}/products/${Date.now()}`}
+            aspectClass="aspect-video"
+            hint="Recomendado: 800×600px, fundo claro"
+            onChange={(url) => set('image', url)}
+          />
 
           <label className="flex items-center gap-3 cursor-pointer">
             <div

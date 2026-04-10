@@ -36,14 +36,22 @@ export interface Restaurant {
   city?:          string
   instagram?:     string
   facebook?:      string
-  description?:   string   // bio / slogan
+  description?:   string
 
-  // Pedido online
+  // Pedido online — operação
   onlineOrderEnabled?: boolean
   deliveryFee?:        number
   minOrderValue?:      number
-  estimatedTime?:      string   // ex: "30–45 min"
-  openingHours?:       string   // ex: "Seg–Sex 11h–22h"
+  estimatedTime?:      string
+  openingHours?:       string
+
+  // Aparência da página do cliente
+  bannerImage?:       string   // imagem de capa (hero) do topo
+  bannerColor?:       string   // cor de fundo do header quando sem banner
+  buttonStyle?:       'rounded' | 'pill' | 'square'
+  fontStyle?:         'modern' | 'classic' | 'bold'
+  cardStyle?:         'shadow' | 'border' | 'flat'
+  showDescription?:   boolean  // exibir descrição do produto no card
 }
 
 // ─── Product ──────────────────────────────────────────────────────────────────

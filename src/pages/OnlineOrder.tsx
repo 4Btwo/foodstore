@@ -57,15 +57,17 @@ function SizeModal({
 // ─── Card de produto ───────────────────────────────────────────────────────────
 function ProductCard({
   product, color, cartQty, onAdd, onRemove, onAddWithSizes,
+  btnRadius, cardCls, fontCls, showDesc,
 }: {
   product: Product; color: string; cartQty: number
   onAdd: () => void; onRemove: () => void; onAddWithSizes: () => void
+  btnRadius: string; cardCls: string; fontCls: string; showDesc: boolean
 }) {
   const isOut = product.stock !== null && product.stock !== undefined && product.stock <= 0
   const hasSizes = (product.sizes ?? []).length > 0
 
   return (
-    <div className={`overflow-hidden rounded-2xl bg-white shadow-sm transition ${isOut ? 'opacity-50' : ''}`}>
+    <div className={`overflow-hidden rounded-2xl bg-white ${cardCls} transition ${isOut ? 'opacity-50' : ''}`}>
       {product.image ? (
         <div className="relative h-40 w-full overflow-hidden">
           <img src={product.image} alt={product.name} className="h-full w-full object-cover" />
@@ -80,8 +82,8 @@ function ProductCard({
       )}
 
       <div className="p-4">
-        <p className="font-bold text-gray-900">{product.name}</p>
-        {product.description && (
+        <p className={`font-bold text-gray-900 ${fontCls}`}>{product.name}</p>
+        {showDesc && product.description && (
           <p className="mt-0.5 text-xs text-gray-400 leading-relaxed">{product.description}</p>
         )}
         {hasSizes ? (
@@ -105,7 +107,7 @@ function ProductCard({
             ) : (
               <button
                 onClick={hasSizes ? onAddWithSizes : onAdd}
-                className="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold text-white transition active:scale-95"
+                className={`flex items-center gap-2 ${btnRadius} px-4 py-2 text-sm font-bold text-white transition active:scale-95`}
                 style={{ background: color }}
               >
                 <span>+</span> Adicionar
@@ -138,7 +140,14 @@ export default function OnlineOrderPage() {
   const [address, setAddress]             = useState('')
   const [notes, setNotes]                 = useState('')
 
-  const color = restaurant?.primaryColor ?? '#f97316'
+  const color       = restaurant?.primaryColor ?? '#f97316'
+  const r           = restaurant as (Restaurant & Record<string, unknown>) | null
+  const bannerImage = (r?.bannerImage as string) ?? ''
+  const bannerColor = (r?.bannerColor as string) || color
+  const btnRadius   = r?.buttonStyle === 'pill' ? 'rounded-full' : r?.buttonStyle === 'square' ? 'rounded-none' : 'rounded-xl'
+  const fontCls     = r?.fontStyle === 'classic' ? 'font-serif' : r?.fontStyle === 'bold' ? 'font-black' : ''
+  const cardCls     = r?.cardStyle === 'border' ? 'border border-gray-200' : r?.cardStyle === 'flat' ? 'bg-gray-50' : 'shadow-sm'
+  const showDesc    = r?.showDescription !== false
 
   useEffect(() => {
     if (!restaurantId) return
@@ -454,45 +463,52 @@ export default function OnlineOrderPage() {
 
       {/* Header do restaurante */}
       <div className="bg-white shadow-sm">
-        <div className="h-2 w-full" style={{ background: color }} />
-        <div className="px-4 py-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl text-xl font-black text-white shadow" style={{ background: color }}>
-              {restaurant?.name?.charAt(0) ?? '🍽'}
-            </div>
-            <div>
-              <h1 className="text-lg font-black text-gray-900">{restaurant?.name ?? 'Cardápio'}</h1>
-              <p className="text-xs text-gray-500">{(restaurant as Restaurant & { description?: string })?.description || 'Peça pelo app e receba em casa 🛵'}</p>
+        {/* Banner / cor de fundo */}
+        <div className="relative" style={{ background: bannerColor }}>
+          {bannerImage && (
+            <img src={bannerImage} alt="" className="w-full h-32 object-cover opacity-50" />
+          )}
+          <div className={`${bannerImage ? 'absolute inset-0' : 'pt-1'} flex items-end gap-3 px-4 pb-4 pt-4`}>
+            {restaurant?.logo ? (
+              <img src={restaurant.logo} alt="" className="h-12 w-12 rounded-2xl object-cover border-2 border-white/80 shadow shrink-0" />
+            ) : (
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl text-xl font-black text-white shadow shrink-0"
+                style={{ background: color }}>
+                {restaurant?.name?.charAt(0) ?? '🍽'}
+              </div>
+            )}
+            <div className="min-w-0">
+              <h1 className={`text-lg font-black leading-tight text-white drop-shadow-sm ${fontCls}`}>
+                {restaurant?.name ?? 'Cardápio'}
+              </h1>
+              <p className="text-xs text-white/75 truncate">
+                {r?.description as string || 'Peça pelo app e receba em casa 🛵'}
+              </p>
             </div>
           </div>
+        </div>
 
+        <div className="px-4 pb-3 pt-2">
           {/* Infos de entrega */}
-          {(() => {
-            const r = restaurant as Restaurant & { estimatedTime?: string; deliveryFee?: number; minOrderValue?: number; openingHours?: string }
-            const hasInfo = r?.estimatedTime || r?.deliveryFee != null || r?.minOrderValue || r?.openingHours
-            return hasInfo ? (
-              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
-                {r?.estimatedTime && <span>⏱ {r.estimatedTime}</span>}
-                {r?.deliveryFee != null && (
-                  <span>{r.deliveryFee > 0 ? `🛵 R$ ${r.deliveryFee.toFixed(2)}` : '🛵 Entrega grátis'}</span>
-                )}
-                {r?.minOrderValue && <span>📦 Mín. R$ {r.minOrderValue.toFixed(2)}</span>}
-                {r?.openingHours && <span>🕐 {r.openingHours}</span>}
-              </div>
-            ) : null
-          })()}
+          {(r?.estimatedTime || r?.deliveryFee != null || r?.minOrderValue || r?.openingHours) && (
+            <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+              {r?.estimatedTime && <span>⏱ {r.estimatedTime as string}</span>}
+              {(r?.deliveryFee as number) != null && (
+                <span>{(r?.deliveryFee as number) > 0 ? `🛵 R$ ${(r?.deliveryFee as number).toFixed(2)}` : '🛵 Entrega grátis'}</span>
+              )}
+              {r?.minOrderValue && <span>📦 Mín. R$ {(r?.minOrderValue as number).toFixed(2)}</span>}
+              {r?.openingHours && <span>🕐 {r.openingHours as string}</span>}
+            </div>
+          )}
 
           {/* Categorias */}
-          <div className="mt-4 flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
             {categories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setActiveCategory(cat)}
-                className={`whitespace-nowrap rounded-full px-4 py-2 text-xs font-bold transition ${
+              <button key={cat} onClick={() => setActiveCategory(cat)}
+                className={`whitespace-nowrap px-4 py-2 text-xs font-bold transition ${btnRadius} ${
                   activeCategory === cat ? 'text-white shadow-sm' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                 }`}
-                style={activeCategory === cat ? { background: color } : {}}
-              >
+                style={activeCategory === cat ? { background: color } : {}}>
                 {cat}
               </button>
             ))}
@@ -520,6 +536,10 @@ export default function OnlineOrderPage() {
                   onAdd={() => addToCart(product)}
                   onRemove={() => removeFromCart(product.id)}
                   onAddWithSizes={() => setSizePicker(product)}
+                  btnRadius={btnRadius}
+                  cardCls={cardCls}
+                  fontCls={fontCls}
+                  showDesc={showDesc}
                 />
               ))}
             </div>
@@ -532,7 +552,7 @@ export default function OnlineOrderPage() {
         <div className="fixed bottom-0 left-0 right-0 p-4">
           <button
             onClick={() => setStep('cart')}
-            className="mx-auto flex w-full max-w-md items-center justify-between rounded-2xl px-5 py-4 text-white shadow-xl active:scale-[.98] transition"
+            className={`mx-auto flex w-full max-w-md items-center justify-between ${btnRadius} px-5 py-4 text-white shadow-xl active:scale-[.98] transition`}
             style={{ background: color }}
           >
             <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/20 text-sm font-black">
