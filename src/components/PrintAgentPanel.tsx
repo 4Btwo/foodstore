@@ -12,6 +12,7 @@
  */
 
 import { useState } from 'react'
+import { detectBestConnectionType } from '@/services/printEngine'
 import type { PrintAgentState } from '@/hooks/usePrintAgent'
 import type { PrintJob, PrinterConfig } from '@/types/print'
 import { PRINTER_PRESETS } from '@/types/print'
@@ -154,8 +155,60 @@ function ConfigModal({
             <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
           </div>
 
-          {/* Preset */}
-          <label className="block text-xs font-medium text-gray-600 mb-1">Modelo da impressora</label>
+          {/* Tipo de conexão — MAIS IMPORTANTE */}
+          <label className="block text-xs font-medium text-gray-600 mb-2">Tipo de conexão</label>
+          <div className="flex flex-col gap-2 mb-4">
+            <button
+              onClick={() => setDraft((d) => ({ ...d, connectionType: 'browser' }))}
+              className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 text-sm transition text-left ${draft.connectionType === 'browser' ? 'border-green-500 bg-green-50 text-green-800' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}
+            >
+              <span className="text-2xl">🖥️</span>
+              <div>
+                <div className="font-semibold">USB — Impressora do Sistema <span className="text-xs font-normal bg-green-100 text-green-700 rounded px-1 ml-1">RECOMENDADO</span></div>
+                <div className="text-xs opacity-70">Windows reconhece automaticamente · Funciona com qualquer impressora USB</div>
+              </div>
+            </button>
+            <button
+              onClick={() => setDraft((d) => ({ ...d, connectionType: 'bluetooth' }))}
+              className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 text-sm transition text-left ${draft.connectionType === 'bluetooth' ? 'border-blue-500 bg-blue-50 text-blue-800' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}
+            >
+              <span className="text-2xl">🔵</span>
+              <div>
+                <div className="font-semibold">Bluetooth</div>
+                <div className="text-xs opacity-70">Chrome Android · Impressora térmica sem fio</div>
+              </div>
+            </button>
+            <button
+              onClick={() => setDraft((d) => ({ ...d, connectionType: 'serial' }))}
+              className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 text-sm transition text-left ${draft.connectionType === 'serial' ? 'border-gray-600 bg-gray-50 text-gray-800' : 'border-gray-200 text-gray-400 hover:border-gray-300'}`}
+            >
+              <span className="text-2xl">🔌</span>
+              <div>
+                <div className="font-semibold">Serial / COM Port <span className="text-xs font-normal opacity-60">(avançado)</span></div>
+                <div className="text-xs opacity-70">Impressoras que aparecem como COM3, COM4, etc.</div>
+              </div>
+            </button>
+          </div>
+
+          {draft.connectionType === 'browser' && (
+            <div className="mb-4 rounded-xl bg-green-50 border border-green-200 p-3 text-xs text-green-800">
+              🖥️ <strong>Modo recomendado para desktop.</strong> O Chrome vai abrir o diálogo de impressão do Windows — selecione sua impressora térmica e clique em Imprimir. Configure a impressora como padrão para agilizar.
+            </div>
+          )}
+          {draft.connectionType === 'bluetooth' && (
+            <div className="mb-4 rounded-xl bg-blue-50 p-3 text-xs text-blue-700">
+              🔵 <strong>Bluetooth:</strong> funciona no Chrome Android. No PC, o Bluetooth não é suportado pelo navegador — use o modo USB acima.
+            </div>
+          )}
+          {draft.connectionType === 'serial' && (
+            <div className="mb-4 rounded-xl bg-gray-50 border border-gray-200 p-3 text-xs text-gray-700">
+              🔌 <strong>Serial/COM:</strong> para impressoras que aparecem como porta COM no Gerenciador de Dispositivos. O Chrome vai pedir para selecionar a porta.
+            </div>
+          )}
+
+          {/* Preset — só para Bluetooth */}
+          {draft.connectionType === 'bluetooth' && (
+          <><label className="block text-xs font-medium text-gray-600 mb-1">Modelo da impressora</label>
           <select
             className="w-full border rounded-lg px-3 py-2 text-sm mb-4"
             onChange={(e) => applyPreset(e.target.value)}
@@ -165,7 +218,25 @@ function ConfigModal({
             {Object.keys(PRINTER_PRESETS).map((name) => (
               <option key={name} value={name}>{name}</option>
             ))}
-          </select>
+          </select></>
+          )}
+
+          {/* Baud Rate — só para USB/Serial */}
+          {draft.connectionType === 'serial' && (
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Baud Rate</label>
+              <select
+                className="w-full border rounded-lg px-3 py-2 text-sm"
+                value={draft.serialBaudRate ?? 9600}
+                onChange={(e) => setDraft((d) => ({ ...d, serialBaudRate: Number(e.target.value) }))}
+              >
+                <option value={9600}>9600 (padrão)</option>
+                <option value={19200}>19200</option>
+                <option value={38400}>38400</option>
+                <option value={115200}>115200</option>
+              </select>
+            </div>
+          )}
 
           {/* Nome do restaurante */}
           <label className="block text-xs font-medium text-gray-600 mb-1">Nome no cupom</label>
@@ -252,7 +323,7 @@ function ConfigModal({
             >
               <div className={`w-5 h-5 bg-white rounded-full shadow m-0.5 transition-transform ${draft.autoReconnect ? 'translate-x-5' : ''}`} />
             </div>
-            <span className="text-sm text-gray-700">Auto-reconexão Bluetooth</span>
+            <span className="text-sm text-gray-700">Auto-reconexão <span className="text-xs text-gray-400">(só Bluetooth)</span></span>
           </label>
 
           <button
@@ -310,6 +381,7 @@ export function PrintAgentPanel({ agent }: { agent: PrintAgentState }) {
             <div className="flex items-center gap-2">
               <div className={`w-2.5 h-2.5 rounded-full ${STATUS_DOT[agent.connectionStatus]}`} />
               <span className="text-sm text-gray-700">
+                <span className="mr-1">{agent.config.connectionType === 'browser' ? '🖥️' : agent.config.connectionType === 'serial' ? '🔌' : '🔵'}</span>
                 {STATUS_LABEL[agent.connectionStatus]}
                 {agent.printerDeviceName && (
                   <span className="text-gray-400 ml-1">— {agent.printerDeviceName}</span>

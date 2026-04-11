@@ -24,10 +24,13 @@ import {
   resetToPending,
 } from '@/services/printQueue'
 import {
-  BluetoothPrinter,
+  createPrinter,
   buildTicketBuffer,
+  buildHTMLTicket,
+  BrowserPrinter,
   loadPrinterConfig,
   savePrinterConfig,
+  type IPrinter,
 } from '@/services/printEngine'
 import type { UnifiedOrder } from '@/types'
 import type { PrintJob, PrinterConfig, PrinterConnectionStatus } from '@/types/print'
@@ -65,7 +68,7 @@ export function usePrintAgent(restaurantId: string): PrintAgentState {
   const [isActive,          setIsActive]           = useState(true)
 
   // Referências estáveis (não provocam re-render em closures)
-  const printerRef    = useRef<BluetoothPrinter | null>(null)
+  const printerRef    = useRef<IPrinter | null>(null)
   const processingRef = useRef<Set<string>>(new Set())   // jobIds em andamento
   const retryTimers   = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   const configRef     = useRef(config)
@@ -73,7 +76,7 @@ export function usePrintAgent(restaurantId: string): PrintAgentState {
 
   // ── Inicializa o BluetoothPrinter ─────────────────────────────────────────
   useEffect(() => {
-    printerRef.current = new BluetoothPrinter(config, (status) => {
+    printerRef.current = createPrinter(config, (status) => {
       setConnectionStatus(status as PrinterConnectionStatus)
     })
   }, [])                                                 // apenas 1x
@@ -87,9 +90,15 @@ export function usePrintAgent(restaurantId: string): PrintAgentState {
 
   const connect = useCallback(async () => {
     if (!printerRef.current) return
+    // Re-cria o driver se o connectionType da config mudou
+    const currentType = (printerRef.current as any).config?.connectionType
+    if (currentType !== configRef.current.connectionType) {
+      printerRef.current = createPrinter(configRef.current, (status) => {
+        setConnectionStatus(status as PrinterConnectionStatus)
+      })
+    }
     await printerRef.current.connect()
-    const deviceName = (printerRef.current as any).device?.name ?? 'Impressora'
-    setPrinterDeviceName(deviceName)
+    setPrinterDeviceName(printerRef.current.deviceLabel)
   }, [])
 
   const disconnect = useCallback(async () => {
@@ -123,11 +132,16 @@ export function usePrintAgent(restaurantId: string): PrintAgentState {
       // 1. Sinaliza "printing" no Firestore (anti-duplicação distribuída)
       await markPrinting(job.id)
 
-      // 2. Gera buffer ESC/POS
-      const buffer = buildTicketBuffer(job, cfg)
-
-      // 3. Envia para a impressora
-      await printer.send(buffer)
+      // 2. Gera e envia o ticket no formato correto para o modo de conexão
+      if (cfg.connectionType === 'browser' && printer instanceof BrowserPrinter) {
+        // Desktop: gera HTML e abre diálogo de impressão do sistema
+        const html = buildHTMLTicket(job, cfg)
+        await printer.sendHTML(html)
+      } else {
+        // Bluetooth / Serial: gera buffer ESC/POS binário
+        const buffer = buildTicketBuffer(job, cfg)
+        await printer.send(buffer)
+      }
 
       // 4. Marca como impresso
       const deviceName = (printer as any).device?.name ?? cfg.deviceName

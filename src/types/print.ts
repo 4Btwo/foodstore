@@ -40,21 +40,25 @@ export interface PrintJob {
 // ─── Config da impressora (salva em localStorage) ────────────────────────────
 
 export interface PrinterConfig {
+  connectionType:     'browser' | 'serial' | 'bluetooth'  // 🖥️ browser=desktop USB | 🔌 serial=COM | 🔵 BT=mobile
   deviceName:         string    // nome exibido
-  serviceUUID:        string    // GATT service UUID
-  characteristicUUID: string    // GATT characteristic UUID (write)
+  serviceUUID:        string    // GATT service UUID (Bluetooth)
+  characteristicUUID: string    // GATT characteristic UUID (Bluetooth)
+  serialBaudRate:     number    // baud rate da porta serial (USB) — padrão 9600
   paperWidth:         48 | 58   // colunas (58mm ≈ 48col, 80mm ≈ 48col)
   restaurantName:     string    // cabeçalho do cupom
-  printOnOrigins:     ('mesa' | 'marmita' | 'balcao' | 'online')[]  // quais origens imprimir
-  autoReconnect:      boolean
+  printOnOrigins:     ('mesa' | 'marmita' | 'balcao' | 'online')[]
+  autoReconnect:      boolean   // só Bluetooth
   maxRetries:         number
   retryDelayMs:       number
 }
 
 export const DEFAULT_PRINTER_CONFIG: PrinterConfig = {
+  connectionType:     'browser',  // padrão desktop (USB plug-and-play via window.print())
   deviceName:         'Impressora Térmica',
   serviceUUID:        '000018f0-0000-1000-8000-00805f9b34fb',
   characteristicUUID: '00002af1-0000-1000-8000-00805f9b34fb',
+  serialBaudRate:     9600,
   paperWidth:         48,
   restaurantName:     'FOODSTORE',
   printOnOrigins:     ['mesa', 'marmita', 'balcao', 'online'],

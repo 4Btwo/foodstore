@@ -295,18 +295,32 @@ export default function KitchenPage() {
 
   // Reimprimir — reseta o job na fila de impressão
   const handleReprint = useCallback(async (orderId: string) => {
+    if (!restaurantId) return
     try {
       const [{ resetToPending }, { getDocs, query, collection, where }, { db }] = await Promise.all([
         import('@/services/printQueue'),
         import('firebase/firestore'),
         import('@/services/firebase'),
       ])
-      const snap = await getDocs(query(collection(db, 'print_queue'), where('orderId', '==', orderId)))
-      if (!snap.empty) await resetToPending(snap.docs[0].id)
+      // Inclui restaurantId para satisfazer a regra de segurança do Firestore
+      const snap = await getDocs(
+        query(
+          collection(db, 'print_queue'),
+          where('restaurantId', '==', restaurantId),
+          where('orderId', '==', orderId),
+        )
+      )
+      if (!snap.empty) {
+        await resetToPending(snap.docs[0].id)
+      } else {
+        // Job não existe ainda — cria um novo diretamente via printQueue
+        const { createPrintJob } = await import('@/services/printQueue')
+        console.warn('Reprint: job não encontrado para', orderId)
+      }
     } catch (e) {
       console.error('Reprint error:', e)
     }
-  }, [])
+  }, [restaurantId])
 
   // Fila unificada ordenada do mais antigo para o mais novo
   const allItems: QueueItem[] = [
