@@ -6,7 +6,6 @@ import { useTables } from "@/hooks/useTables"
 import { useOrders } from "@/hooks/useOrders"
 import { useAuth } from "@/hooks/useAuth"
 import { closeTableOrders, subscribeOrderItems, updateTableStatus } from "@/services/orders"
-import { doc, getDoc } from "firebase/firestore"
 import { db } from "@/services/firebase"
 import type { Table, Order, OrderItem } from "@/types"
 

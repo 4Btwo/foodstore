@@ -20,6 +20,7 @@ import OnlineOrderPage       from '@/pages/OnlineOrder'
 import SuperAdminPage        from '@/pages/SuperAdmin'
 import OrdersCenterPage        from '@/pages/OrdersCenter'
 import OnlineOrdersDashboard   from '@/pages/OnlineOrdersDashboard'
+import PrintAgentPage          from '@/pages/PrintAgent'
 
 const ALL_STAFF = ['admin', 'cashier', 'waiter'] as const
 
@@ -61,7 +62,10 @@ export default function App() {
           {/* ── Entregador ── */}
           <Route path="/delivery" element={<ProtectedRoute allowedRoles={['admin', 'delivery']}><DeliveryDashboardPage /></ProtectedRoute>} />
 
-          {/* ── Públicas ── */}
+          {/* ── Agente de Impressão ── */}
+          <Route path="/print-agent" element={<ProtectedRoute allowedRoles={['admin', 'kitchen', 'cashier']}><PrintAgentPage /></ProtectedRoute>} />
+
+          {/* ── Público ── */}
           <Route path="/menu/:restaurantId/:table" element={<CustomerMenuPage />} />
           <Route path="/pedido/:restaurantId"      element={<OnlineOrderPage />} />
           <Route path="/qrcodes" element={<ProtectedRoute allowedRoles={['admin']}><QrCodesPage /></ProtectedRoute>} />

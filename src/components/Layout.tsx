@@ -25,6 +25,7 @@ const NAV: NavItem[] = [
   { label: 'QR Codes',           path: '/qrcodes',          icon: '📷', module: 'qrcodes',    roles: ['admin'] },
   { label: 'Usuários',           path: '/users',            icon: '👥', module: 'users',      roles: ['admin'] },
   { label: 'Configurações',      path: '/settings',         icon: '⚙️', module: 'settings',   roles: ['admin'] },
+  { label: 'Impressão Auto',     path: '/print-agent',      icon: '🖨️', module: 'kitchen',    roles: ['admin', 'kitchen', 'cashier'] },
   { label: 'Mesas',              path: '/tables',   icon: '🍽️', module: 'tables',  roles: ['admin', 'waiter', 'cashier'], section: 'extra' },
   { label: 'Caixa / PDV',        path: '/cashier',  icon: '💳', module: 'cashier', roles: ['admin', 'cashier'],           section: 'extra' },
 ]

@@ -71,7 +71,15 @@ service cloud.firestore {
       allow write:  if hasSuperAccess() || isAuthenticated();
     }
 
-    // Corridas do entregador
+    // Fila de impressão automática
+    match /print_queue/{jobId} {
+      allow read:   if hasSuperAccess() || (isAuthenticated() && belongsToRestaurant(resource.data.restaurantId));
+      allow create: if hasSuperAccess() || (isAuthenticated() && belongsToRestaurant(request.resource.data.restaurantId));
+      allow update: if hasSuperAccess() || (isAuthenticated() && belongsToRestaurant(resource.data.restaurantId));
+      allow delete: if hasSuperAccess() || isAdminOf(resource.data.restaurantId);
+    }
+
+        // Corridas do entregador
     match /delivery_runs/{runId} {
       allow read: if hasSuperAccess() || (isAuthenticated() && (
         belongsToRestaurant(resource.data.restaurantId) ||

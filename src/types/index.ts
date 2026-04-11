@@ -255,3 +255,5 @@ export interface UnifiedOrder {
   items:     UnifiedOrderItem[]
   createdAt: Date
 }
+// ─── Impressão automática ────────────────────────────────────────────────────
+export type { PrintJob, PrintJobStatus, PrinterConfig, PrinterConnectionStatus } from './print'

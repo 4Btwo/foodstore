@@ -18,6 +18,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Layout, PageHeader } from '@/components/Layout'
 import { useAuth } from '@/hooks/useAuth'
+import { usePrintAgent } from '@/hooks/usePrintAgent'
+import { PrintAgentFAB } from '@/components/PrintAgentPanel'
 import {
   subscribeAllOrders,
   confirmOrder,
@@ -490,6 +492,7 @@ const ORIGIN_FILTERS: Array<{ key: UnifiedOrderOrigin | 'all'; label: string; ic
 
 export default function OrdersCenterPage() {
   const { restaurantId }          = useAuth()
+  const agent                     = usePrintAgent(restaurantId ?? '')
   const [orders, setOrders]       = useState<UnifiedOrder[]>([])
   const [deliverers, setDeliverers] = useState<AppUser[]>([])
   const [products, setProducts]   = useState<Product[]>([])
@@ -635,6 +638,9 @@ export default function OrdersCenterPage() {
           onClose={() => setShowBalcao(false)}
         />
       )}
+
+      {/* Agente de impressão automática */}
+      <PrintAgentFAB agent={agent} />
     </Layout>
   )
 }

@@ -1,448 +1,411 @@
-import { useEffect, useRef, useState } from 'react'
+/**
+ * Kitchen.tsx — Tela da Cozinha
+ *
+ * Fluxo:
+ *  1. Pedido chega → impressora imprime automaticamente (usePrintAgent)
+ *  2. Cozinheiro pega o ticket de papel e prepara
+ *  3. Quando termina → abre o app → clica "✅ Pronto"
+ *  4. Central de Pedidos é notificada em tempo real
+ *
+ * Layout: fila única em rolagem, ordem cronológica (mais antigo primeiro = mais urgente)
+ * Não há botão de "aceitar" — a cozinha só marca como Pronto.
+ */
+
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { Layout, PageHeader } from '@/components/Layout'
-import { OrderStatusBadge } from '@/components/OrderStatusBadge'
 import { NotificationBell } from '@/components/NotificationBell'
-import { useOrders } from '@/hooks/useOrders'
 import { useAuth } from '@/hooks/useAuth'
 import { usePushNotification } from '@/hooks/usePushNotification'
+import { usePrintAgent } from '@/hooks/usePrintAgent'
+import { PrintAgentFAB } from '@/components/PrintAgentPanel'
 import { updateOrderStatus, subscribeOrderItems } from '@/services/orders'
 import { subscribeMarmitaOrders, subscribeMarmitaOrderItems, updateMarmitaOrderStatus } from '@/services/marmitaria'
+import { useOrders } from '@/hooks/useOrders'
 import type { Order, OrderItem, MarmitaOrder, MarmitaOrderItem } from '@/types'
 
-// ─── Impressora Térmica ───────────────────────────────────────────────────────
-// Protocolo ESC/POS via Web Serial API ou impressão via window.print()
+// ─── Helpers de tempo ─────────────────────────────────────────────────────────
 
-async function printOrderTicket(data: {
-  type: 'mesa' | 'marmita'
-  identifier: string   // ex: "Mesa 5" ou "João Silva"
-  delivery?: string    // para marmita: "Retirada" | "Entrega — Rua X"
-  items: { name: string; qty: number }[]
-  notes?: string
-  total: number
-  createdAt: Date
-}) {
-  const time = data.createdAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-  const lines = [
-    '================================',
-    data.type === 'mesa' ? `       PEDIDO — ${data.identifier}` : '       MARMITARIA',
-    data.type === 'marmita' ? `    ${data.identifier}` : '',
-    data.delivery ? `    ${data.delivery}` : '',
-    `    ${time}`,
-    '================================',
-    ...data.items.map((i) => `  ${String(i.qty).padStart(2)}x  ${i.name}`),
-    '--------------------------------',
-    data.notes ? `  OBS: ${data.notes}` : '',
-    `  TOTAL: R$ ${data.total.toFixed(2)}`,
-    '================================',
-    '',
-  ].filter((l) => l !== undefined)
+function useElapsed(date: Date) {
+  const [elapsed, setElapsed] = useState(() =>
+    Math.floor((Date.now() - date.getTime()) / 60000),
+  )
+  useEffect(() => {
+    const id = setInterval(
+      () => setElapsed(Math.floor((Date.now() - date.getTime()) / 60000)),
+      30_000,
+    )
+    return () => clearInterval(id)
+  }, [date])
+  return elapsed
+}
 
-  // Tenta Web Serial API (impressora ESC/POS USB/Serial)
-  if ('serial' in navigator) {
-    try {
-      // @ts-ignore
-      const port = await navigator.serial.requestPort()
-      await port.open({ baudRate: 9600 })
-      const writer = port.writable.getWriter()
-      const encoder = new TextEncoder()
-      // ESC/POS: inicializar + texto + corte
-      const ESC = 0x1b
-      const GS  = 0x1d
-      const init  = new Uint8Array([ESC, 0x40])           // ESC @ — init
-      const cut   = new Uint8Array([GS,  0x56, 0x41, 0])  // GS V A — full cut
-      await writer.write(init)
-      await writer.write(encoder.encode(lines.join('\n')))
-      await writer.write(cut)
-      writer.releaseLock()
-      await port.close()
-      return
-    } catch {
-      // fallback para impressão do browser
-    }
-  }
+// ─── Badge de urgência ────────────────────────────────────────────────────────
 
-  // Fallback: abre janela de impressão estilizada para 80mm
-  const win = window.open('', '_blank', 'width=350,height=600')
-  if (!win) return
-  win.document.write(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8"/>
-      <title>Pedido</title>
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-          font-family: 'Courier New', monospace;
-          font-size: 12px;
-          width: 80mm;
-          padding: 4mm;
-          background: white;
-          color: black;
-        }
-        pre { white-space: pre-wrap; word-break: break-word; }
-        @media print {
-          body { width: 80mm; }
-          @page { margin: 0; size: 80mm auto; }
-        }
-      </style>
-    </head>
-    <body>
-      <pre>${lines.join('\n')}</pre>
-      <script>window.onload = () => { window.print(); window.close(); }<\/script>
-    </body>
-    </html>
-  `)
-  win.document.close()
+function UrgencyBadge({ elapsed, status }: { elapsed: number; status: string }) {
+  if (status === 'ready') return null
+  if (elapsed >= 15) return (
+    <span className="animate-pulse rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-600">
+      🔴 {elapsed}min — URGENTE
+    </span>
+  )
+  if (elapsed >= 10) return (
+    <span className="rounded-full bg-orange-100 px-2 py-0.5 text-xs font-bold text-orange-600">
+      🟠 {elapsed}min
+    </span>
+  )
+  return (
+    <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">
+      {elapsed}min
+    </span>
+  )
+}
+
+// ─── Número do pedido ─────────────────────────────────────────────────────────
+
+function OrderNumber({ id, prefix }: { id: string; prefix?: string }) {
+  return (
+    <span className="font-mono text-xs font-bold tracking-widest text-gray-400 uppercase">
+      #{(prefix ?? '') + id.slice(-4).toUpperCase()}
+    </span>
+  )
 }
 
 // ─── Card pedido mesa ─────────────────────────────────────────────────────────
 
-function KitchenCard({ order, onPrint }: { order: Order; onPrint: (o: Order) => void }) {
+function KitchenCard({
+  order, seqIndex, onReprint,
+}: {
+  order: Order; seqIndex: number; onReprint: (id: string) => void
+}) {
   const [items, setItems]       = useState<OrderItem[]>([])
   const [updating, setUpdating] = useState(false)
-  const printed                 = useRef(false)
+  const elapsed                 = useElapsed(order.createdAt)
+  const isReady                 = order.status === 'ready'
 
-  useEffect(() => {
-    const unsub = subscribeOrderItems(order.id, (itms) => {
-      setItems(itms)
-      // Imprime automaticamente quando o pedido chega (status new) e ainda não imprimiu
-      if (order.status === 'new' && !printed.current && itms.length > 0) {
-        printed.current = true
-        onPrint(order)
-      }
-    })
-    return unsub
-  }, [order.id, order.status, onPrint])
+  useEffect(() => { return subscribeOrderItems(order.id, setItems) }, [order.id])
 
-  const elapsed  = Math.floor((Date.now() - order.createdAt.getTime()) / 60000)
-  const isUrgent = elapsed >= 10 && order.status !== 'ready'
-
-  async function advance() {
+  async function markReady() {
     setUpdating(true)
-    const next = order.status === 'new' ? 'preparing' : 'ready'
-    await updateOrderStatus(order.id, next)
+    await updateOrderStatus(order.id, 'ready')
     setUpdating(false)
   }
 
-  const borderColor = {
-    new:       isUrgent ? 'border-red-400' : 'border-blue-300',
-    preparing: 'border-amber-300',
-    ready:     'border-green-300',
-    closed:    'border-gray-200',
-  }[order.status]
+  const borderColor = isReady
+    ? 'border-green-300 bg-green-50'
+    : elapsed >= 15 ? 'border-red-400 bg-red-50'
+    : elapsed >= 10 ? 'border-orange-300 bg-orange-50'
+    : 'border-blue-200 bg-white'
 
   return (
-    <div className={`flex flex-col rounded-2xl border-2 bg-white p-4 transition ${borderColor}`}>
-      <div className="mb-3 flex items-center justify-between">
-        <div>
-          <span className="text-xl font-bold text-gray-800">Mesa {order.tableNumber}</span>
-          <span className={`ml-2 text-xs font-medium ${isUrgent ? 'text-red-500' : 'text-gray-400'}`}>
-            {elapsed}min {isUrgent ? '⚠️' : ''}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <OrderStatusBadge status={order.status} />
-          <button
-            onClick={() => onPrint(order)}
-            title="Reimprimir"
-            className="rounded-lg border border-gray-200 px-2 py-1 text-xs text-gray-500 hover:bg-gray-50"
-          >
-            🖨️
-          </button>
-        </div>
+    <div className={`flex rounded-2xl border-2 gap-3 p-4 transition-all ${borderColor}`}>
+      <div className="flex flex-col items-center justify-start pt-0.5 shrink-0">
+        <span className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-black ${isReady ? 'bg-green-200 text-green-700' : 'bg-gray-800 text-white'}`}>
+          {seqIndex}
+        </span>
       </div>
 
-      <ul className="mb-4 flex-1 space-y-1.5">
-        {items.map((item) => (
-          <li key={item.id} className="flex items-center gap-2 text-sm">
-            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-gray-100 text-xs font-bold text-gray-600">
-              {item.qty}
-            </span>
-            <span className="text-gray-700">{item.name}</span>
-          </li>
-        ))}
-      </ul>
-
-      {order.status !== 'ready' && order.status !== 'closed' && (
-        <button
-          onClick={advance}
-          disabled={updating}
-          className={`w-full rounded-xl py-2 text-sm font-semibold text-white transition disabled:opacity-50 ${
-            order.status === 'new' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-green-500 hover:bg-green-600'
-          }`}
-        >
-          {updating ? '…' : order.status === 'new' ? '🍳 Preparando' : '✅ Pronto'}
-        </button>
-      )}
-      {order.status === 'ready' && (
-        <div className="rounded-xl bg-green-50 py-2 text-center text-sm font-medium text-green-700">
-          ✅ Aguardando retirada
+      <div className="flex-1 min-w-0">
+        <div className="mb-2 flex items-start justify-between gap-2 flex-wrap">
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-lg font-black text-gray-900">Mesa {order.tableNumber}</span>
+              <UrgencyBadge elapsed={elapsed} status={order.status} />
+            </div>
+            <OrderNumber id={order.id} />
+          </div>
+          <button
+            onClick={() => onReprint(order.id)}
+            className="shrink-0 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500 hover:bg-gray-50 active:scale-95"
+          >
+            🖨️ Reimprimir
+          </button>
         </div>
-      )}
+
+        <ul className="mb-3 space-y-1">
+          {items.map((item) => (
+            <li key={item.id} className="flex items-center gap-2 text-sm">
+              <span className="flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-gray-800 text-xs font-bold text-white">
+                {item.qty}
+              </span>
+              <span className="text-gray-800 font-medium">
+                {item.name}
+                {item.size && <span className="ml-1 text-xs text-gray-400">({item.size})</span>}
+              </span>
+            </li>
+          ))}
+        </ul>
+
+        {isReady ? (
+          <div className="rounded-xl bg-green-100 py-2 text-center text-sm font-semibold text-green-700">
+            ✅ Pronto — aguardando retirada
+          </div>
+        ) : (
+          <button
+            onClick={markReady}
+            disabled={updating}
+            className="w-full rounded-xl bg-green-500 py-2.5 text-sm font-bold text-white transition hover:bg-green-600 active:scale-95 disabled:opacity-50"
+          >
+            {updating ? '…' : '✅ Marcar como Pronto'}
+          </button>
+        )}
+      </div>
     </div>
   )
 }
 
-// ─── Card pedido marmitaria ───────────────────────────────────────────────────
+// ─── Card marmitaria / balcão / online ───────────────────────────────────────
 
-function MarmitaKitchenCard({ order, onPrint }: { order: MarmitaOrder; onPrint: (o: MarmitaOrder) => void }) {
+function MarmitaKitchenCard({
+  order, seqIndex, onReprint,
+}: {
+  order: MarmitaOrder; seqIndex: number; onReprint: (id: string) => void
+}) {
   const [items, setItems]       = useState<MarmitaOrderItem[]>([])
   const [updating, setUpdating] = useState(false)
-  const printed                 = useRef(false)
+  const elapsed                 = useElapsed(order.createdAt)
+  const isReady                 = ['ready', 'out_for_delivery', 'delivered'].includes(order.status)
 
-  useEffect(() => {
-    const unsub = subscribeMarmitaOrderItems(order.id, (itms) => {
-      setItems(itms)
-      if (order.status === 'new' && !printed.current && itms.length > 0) {
-        printed.current = true
-        onPrint(order)
-      }
-    })
-    return unsub
-  }, [order.id, order.status, onPrint])
+  useEffect(() => { return subscribeMarmitaOrderItems(order.id, setItems) }, [order.id])
 
-  const elapsed = Math.floor((Date.now() - order.createdAt.getTime()) / 60000)
-
-  async function advance() {
+  async function markReady() {
     setUpdating(true)
-    const next = order.status === 'new' ? 'preparing' : order.status === 'preparing' ? 'ready' : order.deliveryType === 'delivery' ? 'out_for_delivery' : 'delivered'
-    await updateMarmitaOrderStatus(order.id, next as any)
+    await updateMarmitaOrderStatus(order.id, 'ready')
     setUpdating(false)
   }
 
-  const nextLabel: Record<string, string> = {
-    new:       '🍳 Preparando',
-    preparing: '✅ Pronto',
-    ready:     order.deliveryType === 'delivery' ? '🛵 Saiu p/ entrega' : '🏃 Retirado',
-  }
+  const borderColor = isReady
+    ? 'border-green-300 bg-green-50'
+    : elapsed >= 15 ? 'border-red-400 bg-red-50'
+    : elapsed >= 10 ? 'border-orange-300 bg-orange-50'
+    : 'border-purple-200 bg-white'
 
-  const borderColor: Record<string, string> = {
-    new:       'border-purple-300',
-    preparing: 'border-amber-300',
-    ready:     'border-green-300',
-  }
+  const typeInfo = order.deliveryType === 'delivery'
+    ? { icon: '🛵', label: 'Entrega', cls: 'bg-purple-100 text-purple-700' }
+    : { icon: '🏃', label: 'Retirada', cls: 'bg-teal-100 text-teal-700' }
 
   return (
-    <div className={`flex flex-col rounded-2xl border-2 bg-white p-4 transition ${borderColor[order.status] ?? 'border-gray-200'}`}>
-      <div className="mb-1 flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-bold text-purple-600">🍱 Marmita</span>
-          <span className={`text-xs ${order.deliveryType === 'delivery' ? 'text-purple-500' : 'text-teal-500'}`}>
-            {order.deliveryType === 'delivery' ? '🛵' : '🏃'}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-400">{elapsed}min</span>
-          <button
-            onClick={() => onPrint(order)}
-            title="Reimprimir"
-            className="rounded-lg border border-gray-200 px-2 py-1 text-xs text-gray-500 hover:bg-gray-50"
-          >
-            🖨️
-          </button>
-        </div>
+    <div className={`flex rounded-2xl border-2 gap-3 p-4 transition-all ${borderColor}`}>
+      <div className="flex flex-col items-center justify-start pt-0.5 shrink-0">
+        <span className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-black ${isReady ? 'bg-green-200 text-green-700' : 'bg-purple-700 text-white'}`}>
+          {seqIndex}
+        </span>
       </div>
 
-      <p className="mb-0.5 font-bold text-gray-800">{order.customerName}</p>
-      {order.address && (
-        <p className="mb-2 text-xs text-purple-600">📍 {order.address}</p>
-      )}
+      <div className="flex-1 min-w-0">
+        <div className="mb-2 flex items-start justify-between gap-2 flex-wrap">
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-lg font-black text-gray-900">{order.customerName}</span>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${typeInfo.cls}`}>
+                {typeInfo.icon} {typeInfo.label}
+              </span>
+              <UrgencyBadge elapsed={elapsed} status={order.status} />
+            </div>
+            <div className="flex items-center gap-2">
+              <OrderNumber id={order.id} prefix="M" />
+              {order.address && (
+                <span className="text-xs text-purple-600 truncate max-w-[180px]">📍 {order.address}</span>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={() => onReprint(order.id)}
+            className="shrink-0 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500 hover:bg-gray-50 active:scale-95"
+          >
+            🖨️ Reimprimir
+          </button>
+        </div>
 
-      <ul className="mb-3 flex-1 space-y-1.5">
-        {items.map((item) => (
-          <li key={item.id} className="flex items-center gap-2 text-sm">
-            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-purple-50 text-xs font-bold text-purple-600">
-              {item.qty}
-            </span>
-            <span className="text-gray-700">{item.name}</span>
-          </li>
-        ))}
-      </ul>
+        <ul className="mb-3 space-y-1">
+          {items.map((item) => (
+            <li key={item.id} className="flex items-center gap-2 text-sm">
+              <span className="flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-purple-700 text-xs font-bold text-white">
+                {item.qty}
+              </span>
+              <span className="text-gray-800 font-medium">
+                {item.name}
+                {item.size && <span className="ml-1 text-xs text-gray-400">({item.size})</span>}
+              </span>
+            </li>
+          ))}
+        </ul>
 
-      {order.notes && (
-        <p className="mb-3 rounded-lg bg-amber-50 px-2 py-1.5 text-xs text-amber-700">
-          📝 {order.notes}
-        </p>
-      )}
+        {order.notes && (
+          <p className="mb-3 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-800">
+            📝 {order.notes}
+          </p>
+        )}
 
-      {['new', 'preparing', 'ready'].includes(order.status) && (
-        <button
-          onClick={advance}
-          disabled={updating}
-          className={`w-full rounded-xl py-2 text-sm font-semibold text-white transition disabled:opacity-50 ${
-            order.status === 'new'
-              ? 'bg-amber-500 hover:bg-amber-600'
-              : order.status === 'preparing'
-              ? 'bg-green-500 hover:bg-green-600'
-              : 'bg-purple-500 hover:bg-purple-600'
-          }`}
-        >
-          {updating ? '…' : nextLabel[order.status]}
-        </button>
-      )}
+        {isReady ? (
+          <div className="rounded-xl bg-green-100 py-2 text-center text-sm font-semibold text-green-700">
+            ✅ Pronto — {order.deliveryType === 'delivery' ? 'aguardando entregador' : 'aguardando retirada'}
+          </div>
+        ) : (
+          <button
+            onClick={markReady}
+            disabled={updating}
+            className="w-full rounded-xl bg-green-500 py-2.5 text-sm font-bold text-white transition hover:bg-green-600 active:scale-95 disabled:opacity-50"
+          >
+            {updating ? '…' : '✅ Marcar como Pronto'}
+          </button>
+        )}
+      </div>
     </div>
   )
 }
 
-// ─── Página principal cozinha ─────────────────────────────────────────────────
+// ─── Tipo da fila unificada ───────────────────────────────────────────────────
+
+type QueueItem =
+  | { type: 'mesa';    order: Order;        createdAt: Date }
+  | { type: 'marmita'; order: MarmitaOrder; createdAt: Date }
+
+// ─── Página principal ─────────────────────────────────────────────────────────
 
 export default function KitchenPage() {
   const { restaurantId }       = useAuth()
   const { orders, loading }    = useOrders(['new', 'preparing', 'ready'])
   const { notify, subscribed } = usePushNotification()
   const prevOrderIds           = useRef<Set<string>>(new Set())
+  const agent                  = usePrintAgent(restaurantId ?? '')
 
   const [marmitaOrders, setMarmitaOrders]   = useState<MarmitaOrder[]>([])
   const [marmitaLoading, setMarmitaLoading] = useState(true)
-  const [view, setView]                     = useState<'all' | 'mesa' | 'marmita'>('all')
+  const [filter, setFilter]                 = useState<'all' | 'pending' | 'ready'>('all')
 
-  // Subscribe marmita orders
   useEffect(() => {
     if (!restaurantId) return
-    const unsub = subscribeMarmitaOrders(
+    return subscribeMarmitaOrders(
       restaurantId,
       ['new', 'preparing', 'ready'],
-      (data) => {
-        setMarmitaOrders(data)
-        setMarmitaLoading(false)
-      },
+      (data) => { setMarmitaOrders(data); setMarmitaLoading(false) },
     )
-    return unsub
   }, [restaurantId])
 
-  // Notificações pedidos mesa
+  // Notificação push de novos pedidos
   useEffect(() => {
     if (loading) return
-    const currentIds = new Set(orders.map((o) => o.id))
     orders.forEach((o) => {
-      if (o.status === 'new' && !prevOrderIds.current.has(o.id)) {
-        if (subscribed) notify('🍔 Novo pedido!', `Mesa ${o.tableNumber} — ${o.id.slice(-4).toUpperCase()}`)
+      if (!prevOrderIds.current.has(o.id) && subscribed) {
+        notify('🍔 Novo pedido!', `Mesa ${o.tableNumber}`)
       }
     })
-    prevOrderIds.current = currentIds
+    prevOrderIds.current = new Set(orders.map((o) => o.id))
   }, [orders, loading, subscribed, notify])
 
-  // Auto-print helpers
-  const handlePrintMesa = async (order: Order) => {
-    // items will be passed via the card; here we just call with partial (items loaded in card)
-    // We fetch items via the card component; this is a re-print trigger
-    const { subscribeOrderItems } = await import('@/services/orders')
-    let resolved = false
-    const unsub = subscribeOrderItems(order.id, (items) => {
-      if (!resolved) {
-        resolved = true
-        unsub()
-        printOrderTicket({
-          type:       'mesa',
-          identifier: `Mesa ${order.tableNumber}`,
-          items:      items.map((i) => ({ name: i.name, qty: i.qty })),
-          total:      order.total,
-          createdAt:  order.createdAt,
-        })
-      }
-    })
-  }
+  // Reimprimir — reseta o job na fila de impressão
+  const handleReprint = useCallback(async (orderId: string) => {
+    try {
+      const [{ resetToPending }, { getDocs, query, collection, where }, { db }] = await Promise.all([
+        import('@/services/printQueue'),
+        import('firebase/firestore'),
+        import('@/services/firebase'),
+      ])
+      const snap = await getDocs(query(collection(db, 'print_queue'), where('orderId', '==', orderId)))
+      if (!snap.empty) await resetToPending(snap.docs[0].id)
+    } catch (e) {
+      console.error('Reprint error:', e)
+    }
+  }, [])
 
-  const handlePrintMarmita = async (order: MarmitaOrder) => {
-    let resolved = false
-    const unsub = subscribeMarmitaOrderItems(order.id, (items) => {
-      if (!resolved) {
-        resolved = true
-        unsub()
-        printOrderTicket({
-          type:       'marmita',
-          identifier: order.customerName,
-          delivery:   order.deliveryType === 'delivery'
-            ? `🛵 Entrega — ${order.address}`
-            : '🏃 Retirada no local',
-          items:     items.map((i) => ({ name: i.name, qty: i.qty })),
-          notes:     order.notes,
-          total:     order.total,
-          createdAt: order.createdAt,
-        })
-      }
-    })
-  }
+  // Fila unificada ordenada do mais antigo para o mais novo
+  const allItems: QueueItem[] = [
+    ...orders.map((o): QueueItem => ({ type: 'mesa', order: o, createdAt: o.createdAt })),
+    ...marmitaOrders.map((o): QueueItem => ({ type: 'marmita', order: o, createdAt: o.createdAt })),
+  ].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
 
-  const grouped = {
-    new:       orders.filter((o) => o.status === 'new'),
-    preparing: orders.filter((o) => o.status === 'preparing'),
-    ready:     orders.filter((o) => o.status === 'ready'),
-  }
+  const pendingItems = allItems.filter((i) => ['new', 'preparing'].includes(i.order.status))
+  const readyItems   = allItems.filter((i) => ['ready', 'out_for_delivery'].includes(i.order.status))
 
-  const marmitaGrouped = {
-    new:       marmitaOrders.filter((o) => o.status === 'new'),
-    preparing: marmitaOrders.filter((o) => o.status === 'preparing'),
-    ready:     marmitaOrders.filter((o) => o.status === 'ready'),
-  }
+  const displayed = filter === 'pending' ? pendingItems
+                  : filter === 'ready'   ? readyItems
+                  : allItems
 
-  const totalActive = orders.length + marmitaOrders.length
   const isLoading   = loading && marmitaLoading
+  const totalActive = orders.length + marmitaOrders.length
 
   return (
     <Layout>
       <PageHeader
         title="Cozinha"
-        subtitle={`${totalActive} pedido${totalActive !== 1 ? 's' : ''} ativo${totalActive !== 1 ? 's' : ''}`}
+        subtitle={`${pendingItems.length} em preparo · ${readyItems.length} pronto${readyItems.length !== 1 ? 's' : ''}`}
         action={<NotificationBell />}
       />
 
-      {/* Filtro mesa/marmita */}
-      <div className="flex gap-2 border-b border-gray-100 px-6">
-        {(['all', 'mesa', 'marmita'] as const).map((v) => (
+      {/* Filtros */}
+      <div className="flex gap-2 border-b border-gray-100 px-4">
+        {([
+          { key: 'all',     label: `Todos (${totalActive})` },
+          { key: 'pending', label: `Em preparo (${pendingItems.length})` },
+          { key: 'ready',   label: `Prontos (${readyItems.length})` },
+        ] as const).map(({ key, label }) => (
           <button
-            key={v}
-            onClick={() => setView(v)}
-            className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition ${
-              view === v
+            key={key}
+            onClick={() => setFilter(key)}
+            className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition whitespace-nowrap ${
+              filter === key
                 ? 'border-brand-500 text-brand-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            {v === 'all' ? `Todos (${totalActive})` : v === 'mesa' ? `Mesas (${orders.length})` : `Marmita (${marmitaOrders.length})`}
+            {label}
           </button>
         ))}
       </div>
 
+      {/* Conteúdo */}
       {isLoading ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand-500 border-t-transparent" />
         </div>
+
       ) : totalActive === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 text-gray-400">
-          <span className="text-5xl">🍽️</span>
-          <p className="text-sm">Nenhum pedido ativo no momento</p>
+          <span className="text-6xl">🍽️</span>
+          <p className="text-base font-medium">Nenhum pedido ativo</p>
+          <p className="text-sm">Os pedidos aparecerão aqui automaticamente</p>
           <NotificationBell />
         </div>
-      ) : (
-        <div className="flex flex-1 gap-4 overflow-x-auto p-6">
-          {(['new', 'preparing', 'ready'] as const).map((status) => {
-            const mesaCards    = view !== 'marmita' ? grouped[status] : []
-            const marmitaCards = view !== 'mesa'   ? marmitaGrouped[status] : []
-            const count        = mesaCards.length + marmitaCards.length
 
-            return (
-              <div key={status} className="flex w-72 shrink-0 flex-col gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold uppercase tracking-wide text-gray-600">
-                    {{ new: 'Novos', preparing: 'Preparando', ready: 'Prontos' }[status]}
-                  </span>
-                  <span className="rounded-full bg-gray-100 px-2 text-xs text-gray-500">{count}</span>
-                </div>
-                <div className="space-y-3 overflow-y-auto">
-                  {mesaCards.map((o) => (
-                    <KitchenCard key={o.id} order={o} onPrint={handlePrintMesa} />
-                  ))}
-                  {marmitaCards.map((o) => (
-                    <MarmitaKitchenCard key={o.id} order={o} onPrint={handlePrintMarmita} />
-                  ))}
-                </div>
-              </div>
+      ) : displayed.length === 0 ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-gray-400">
+          <span className="text-4xl">✅</span>
+          <p className="text-sm">Nenhum pedido nessa categoria</p>
+        </div>
+
+      ) : (
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+          {/* Legenda */}
+          <div className="flex items-center gap-2 text-xs text-gray-400 px-1">
+            <span className="font-semibold uppercase tracking-wide">Fila por ordem de chegada</span>
+            <div className="flex-1 h-px bg-gray-100" />
+            <span>{displayed.length} pedido{displayed.length !== 1 ? 's' : ''}</span>
+          </div>
+
+          {displayed.map((item, idx) =>
+            item.type === 'mesa' ? (
+              <KitchenCard
+                key={item.order.id}
+                order={item.order}
+                seqIndex={idx + 1}
+                onReprint={handleReprint}
+              />
+            ) : (
+              <MarmitaKitchenCard
+                key={item.order.id}
+                order={item.order}
+                seqIndex={idx + 1}
+                onReprint={handleReprint}
+              />
             )
-          })}
+          )}
+
+          {/* Espaço para o FAB não cobrir o último card */}
+          <div className="h-24" />
         </div>
       )}
+
+      <PrintAgentFAB agent={agent} />
     </Layout>
   )
 }

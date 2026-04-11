@@ -52,3 +52,30 @@
   .table-open    { @apply border-amber-200 bg-amber-50; }
   .table-closing { @apply border-red-200 bg-red-50; }
 }
+
+/* ── Animações customizadas ── */
+@keyframes shrink-width {
+  from { width: 100%; }
+  to   { width: 0%; }
+}
+.animate-shrink-width {
+  animation: shrink-width 10s linear forwards;
+}
+
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.6; }
+}
+.animate-pulse-slow {
+  animation: pulse-slow 2s ease-in-out infinite;
+}
+
+@keyframes bounce-once {
+  0%   { transform: translateY(0); }
+  30%  { transform: translateY(-8px); }
+  60%  { transform: translateY(-3px); }
+  100% { transform: translateY(0); }
+}
+.animate-bounce-once {
+  animation: bounce-once 0.5s ease-out;
+}
