@@ -285,6 +285,10 @@
           "order": "ASCENDING"
         },
         {
+          "fieldPath": "target",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "print.status",
           "order": "ASCENDING"
         },
@@ -307,6 +311,10 @@
           "order": "ASCENDING"
         },
         {
+          "fieldPath": "target",
+          "order": "ASCENDING"
+        },
+        {
           "fieldPath": "createdAt",
           "order": "DESCENDING"
         },
@@ -326,6 +334,10 @@
         },
         {
           "fieldPath": "orderId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "ticketType",
           "order": "ASCENDING"
         },
         {

@@ -1,19 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
+import { usePrintAgent } from '@/hooks/usePrintAgent'
+import type { PrinterConfig, TicketTemplate, PrintTemplates } from '@/types/print'
+import { PRINTER_PRESETS } from '@/types/print'
+import { loadLocalTemplates, saveLocalTemplates } from '@/services/printEngine'
 import { Layout, PageHeader } from '@/components/Layout'
 import { ImageUploader } from '@/components/ImageUploader'
 import { getRestaurant, updateRestaurant } from '@/services/restaurant'
-import { printTicket, DEFAULT_PRINT_CONFIG } from '@/services/printTicket'
 import { useAuth } from '@/hooks/useAuth'
-import type { Restaurant, PrintConfig } from '@/types'
+import type { Restaurant } from '@/types'
 
-type Tab = 'estabelecimento' | 'aparencia' | 'pedido-online' | 'impressao' | 'financeiro'
+type Tab = 'estabelecimento' | 'aparencia' | 'pedido-online' | 'financeiro' | 'impressao'
 
 const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: 'estabelecimento', label: 'Estabelecimento', icon: '🏪' },
   { key: 'aparencia',       label: 'Aparência',       icon: '🎨' },
   { key: 'pedido-online',   label: 'Pedido Online',   icon: '🌐' },
-  { key: 'impressao',       label: 'Impressão',       icon: '🖨️' },
   { key: 'financeiro',      label: 'Financeiro',      icon: '💰' },
+  { key: 'impressao',      label: 'Impressão',       icon: '🖨️' },
 ]
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -131,8 +134,228 @@ function PagePreview({ name, logo, primaryColor, bannerImage, bannerColor, butto
 }
 
 // ─── Página principal ─────────────────────────────────────────────────────────
+
+// ─── Aba de configuração de impressão ────────────────────────────────────────
+
+const TICKET_LABELS: Record<string, { label: string; icon: string; target: string; desc: string }> = {
+  kitchen_prep:    { label: 'Cozinha — Preparo',         icon: '🍳', target: 'Cozinha',  desc: 'Impresso para todos os pedidos confirmados. Sem preços.' },
+  balcao_retirada: { label: 'Balcão — Número de Retirada', icon: '🎫', target: 'Central', desc: 'Número grande para o cliente aguardar no balcão.' },
+  online_control:  { label: 'Online — Controle Entrega',   icon: '📍', target: 'Central', desc: 'Dados do cliente online: endereço ou retirada.' },
+  mesa_bill:       { label: 'Mesa — Conta do Cliente',     icon: '🧾', target: 'Central', desc: 'Conta detalhada entregue ao cliente antes do pagamento.' },
+  financial:       { label: 'Cupom Financeiro',            icon: '💳', target: 'Central', desc: 'Comprovante com forma de pagamento, após fechar conta.' },
+}
+
+const CONNECTION_TYPES = [
+  { key: 'browser',   icon: '🖥️', label: 'USB (Recomendado)', sub: 'Windows detecta automaticamente' },
+  { key: 'bluetooth', icon: '🔵', label: 'Bluetooth',         sub: 'Chrome Android' },
+  { key: 'serial',    icon: '🔌', label: 'Serial/COM',        sub: 'Porta COM avançada' },
+]
+
+function PrinterBlock({ agent, label }: { agent: any; label: string }) {
+  const [draft, setDraft] = useState<PrinterConfig>({ ...agent.config })
+  const STATUS_DOT: Record<string, string> = {
+    connected: 'bg-green-500', connecting: 'bg-yellow-400 animate-pulse',
+    disconnected: 'bg-gray-400', error: 'bg-red-500',
+  }
+  const STATUS_LABEL: Record<string, string> = {
+    connected: 'Conectada', connecting: 'Conectando…',
+    disconnected: 'Desconectada', error: 'Erro',
+  }
+
+  function save() { agent.updateConfig(draft) }
+
+  return (
+    <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-bold text-gray-700">🖨️ {label}</h3>
+          <p className="text-xs text-gray-400">Configurações de conexão e hardware</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className={`w-2.5 h-2.5 rounded-full ${STATUS_DOT[agent.connectionStatus]}`} />
+          <span className="text-xs text-gray-600">{STATUS_LABEL[agent.connectionStatus]}</span>
+        </div>
+      </div>
+
+      {/* Tipo de conexão */}
+      <div>
+        <label className="block text-xs font-medium text-gray-500 mb-2">Tipo de conexão</label>
+        <div className="flex flex-col gap-2">
+          {CONNECTION_TYPES.map((ct) => (
+            <button key={ct.key}
+              onClick={() => setDraft(d => ({ ...d, connectionType: ct.key as any }))}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 text-left text-sm transition ${draft.connectionType === ct.key ? 'border-brand-500 bg-brand-50 text-brand-800' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}
+            >
+              <span className="text-xl">{ct.icon}</span>
+              <div>
+                <div className="font-semibold text-xs">{ct.label}</div>
+                <div className="text-xs opacity-60">{ct.sub}</div>
+              </div>
+              {draft.connectionType === ct.key && <span className="ml-auto text-brand-600 text-xs font-bold">✓</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Bluetooth presets */}
+      {draft.connectionType === 'bluetooth' && (
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Modelo (Bluetooth)</label>
+          <select className="w-full border rounded-lg px-3 py-2 text-sm"
+            onChange={e => {
+              const p = PRINTER_PRESETS[e.target.value]
+              if (p) setDraft(d => ({ ...d, ...p }))
+            }}>
+            <option value="">Selecione preset…</option>
+            {Object.keys(PRINTER_PRESETS).map(k => <option key={k} value={k}>{k}</option>)}
+          </select>
+        </div>
+      )}
+
+      {/* Largura papel */}
+      <div>
+        <label className="block text-xs font-medium text-gray-500 mb-1">Largura do papel</label>
+        <div className="flex gap-2">
+          {([48, 58] as const).map(w => (
+            <button key={w} onClick={() => setDraft(d => ({ ...d, paperWidth: w }))}
+              className={`flex-1 py-2 rounded-lg text-sm border ${draft.paperWidth === w ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-700 border-gray-300'}`}>
+              {w} colunas
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Botão conectar/salvar */}
+      <div className="flex gap-2 pt-1">
+        <button onClick={save}
+          className="flex-1 rounded-xl bg-gray-800 py-2.5 text-sm font-semibold text-white hover:bg-gray-700">
+          Salvar configuração
+        </button>
+        {draft.connectionType !== 'browser' && (
+          agent.connectionStatus === 'connected'
+            ? <button onClick={agent.disconnect} className="rounded-xl border border-red-200 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50">Desconectar</button>
+            : <button onClick={agent.connect} disabled={agent.connectionStatus === 'connecting'}
+                className="rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-50">
+                {agent.connectionStatus === 'connecting' ? 'Conectando…' : 'Conectar'}
+              </button>
+        )}
+      </div>
+
+      {/* Histórico */}
+      {agent.recentJobs.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-gray-500 mb-2">Últimas impressões (2h)</p>
+          <div className="space-y-1 max-h-32 overflow-y-auto">
+            {agent.recentJobs.map((j: any) => (
+              <div key={j.id} className="flex items-center justify-between text-xs py-1 border-b border-gray-50">
+                <span className="text-gray-700">{j.label} · {TICKET_LABELS[j.ticketType]?.icon}</span>
+                <span className={j.print.status === 'printed' ? 'text-green-600' : j.print.status === 'error' ? 'text-red-500' : 'text-yellow-600'}>
+                  {j.print.status === 'printed' ? '✓' : j.print.status === 'error' ? '✗' : '…'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function TemplateEditor({ templates, onSave }: { templates: any; onSave: (t: any) => void }) {
+  const [draft, setDraft]           = useState({ ...templates })
+  const [selected, setSelected]     = useState('kitchen_prep')
+  const tpl: TicketTemplate         = draft[selected]
+
+  function updateTpl(key: keyof TicketTemplate, value: any) {
+    setDraft((d: any) => ({ ...d, [selected]: { ...d[selected], [key]: value } }))
+  }
+
+  return (
+    <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100 space-y-4">
+      <h3 className="text-sm font-bold text-gray-700">📄 Templates de Cupom</h3>
+
+      {/* Seletor de template */}
+      <div className="flex flex-wrap gap-2">
+        {Object.entries(TICKET_LABELS).map(([key, meta]) => (
+          <button key={key} onClick={() => setSelected(key)}
+            className={`rounded-xl px-3 py-1.5 text-xs font-medium border transition ${selected === key ? 'bg-gray-800 text-white border-gray-800' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+            {meta.icon} {meta.label.split('—')[0].trim()}
+          </button>
+        ))}
+      </div>
+
+      {/* Info do template */}
+      <div className="rounded-xl bg-blue-50 px-4 py-3 text-xs text-blue-700">
+        <strong>{TICKET_LABELS[selected]?.icon} {TICKET_LABELS[selected]?.label}</strong>
+        <br/>Impresso na: <strong>{TICKET_LABELS[selected]?.target}</strong>
+        <br/>{TICKET_LABELS[selected]?.desc}
+      </div>
+
+      {/* Campos editáveis */}
+      <div className="space-y-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Nome no cabeçalho</label>
+          <input className="w-full border rounded-lg px-3 py-2 text-sm" value={tpl.restaurantName}
+            onChange={e => updateTpl('restaurantName', e.target.value)} />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Linha extra (endereço, telefone…)</label>
+          <input className="w-full border rounded-lg px-3 py-2 text-sm" value={tpl.headerExtra ?? ''}
+            onChange={e => updateTpl('headerExtra', e.target.value)} placeholder="Opcional" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Mensagem de rodapé</label>
+          <input className="w-full border rounded-lg px-3 py-2 text-sm" value={tpl.footerMessage}
+            onChange={e => updateTpl('footerMessage', e.target.value)} />
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          {([
+            ['showPrices',      'Mostrar preços'],
+            ['showTotal',       'Mostrar total'],
+            ['showServiceRate', 'Taxa de serviço'],
+            ['showPhone',       'Telefone cliente'],
+            ['showAddress',     'Endereço entrega'],
+            ['showPayment',     'Forma de pagamento'],
+          ] as const).map(([field, label]) => (
+            <label key={field} className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer">
+              <input type="checkbox" checked={!!tpl[field]} onChange={e => updateTpl(field, e.target.checked)}
+                className="rounded" />
+              {label}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <button onClick={() => onSave(draft)}
+        className="w-full rounded-xl bg-brand-500 py-2.5 text-sm font-bold text-white hover:bg-brand-600">
+        Salvar templates
+      </button>
+    </section>
+  )
+}
+
+function PrintSettingsTab({ kitchenAgent, centralAgent }: { kitchenAgent: any; centralAgent: any }) {
+  const templates = kitchenAgent.templates
+  return (
+    <div className="space-y-6">
+      <PrinterBlock agent={kitchenAgent} label="Impressora Cozinha" />
+      <PrinterBlock agent={centralAgent} label="Impressora Central / Balcão" />
+      <TemplateEditor
+        templates={templates}
+        onSave={(t) => {
+          kitchenAgent.updateTemplates(t)
+          centralAgent.updateTemplates(t)
+        }}
+      />
+    </div>
+  )
+}
+
 export default function SettingsPage() {
   const { restaurantId } = useAuth()
+  const kitchenAgent = usePrintAgent(restaurantId ?? '', 'kitchen')
+  const centralAgent = usePrintAgent(restaurantId ?? '', 'central')
   const [restaurant, setRestaurant] = useState<Restaurant | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving]   = useState(false)
@@ -172,9 +395,6 @@ export default function SettingsPage() {
   const [serviceRate, setServiceRate] = useState(10)
   const [mpToken, setMpToken]         = useState('')
 
-  // ── Impressão ──
-  const [printConfig, setPrintConfig] = useState<PrintConfig>(DEFAULT_PRINT_CONFIG)
-
   useEffect(() => {
     if (!restaurantId) return
     getRestaurant(restaurantId).then((r) => {
@@ -204,9 +424,6 @@ export default function SettingsPage() {
         setEstimatedTime(r.estimatedTime ?? '')
         setOpeningHours(r.openingHours ?? '')
         setServiceRate(Math.round((r.serviceRate ?? 0.1) * 100))
-        if ((r as Restaurant & { printConfig?: PrintConfig }).printConfig) {
-          setPrintConfig({ ...DEFAULT_PRINT_CONFIG, ...(r as Restaurant & { printConfig?: PrintConfig }).printConfig })
-        }
       }
       setLoading(false)
     })
@@ -227,7 +444,6 @@ export default function SettingsPage() {
         minOrderValue: minOrderValue ? parseFloat(minOrderValue) : null,
         estimatedTime, openingHours,
         serviceRate: serviceRate / 100,
-        printConfig,
       }
       // Remove strings vazias e nulls desnecessários
       Object.keys(updates).forEach(k => {
@@ -302,6 +518,7 @@ export default function SettingsPage() {
                     <ImageUploader
                       label="Logo do restaurante"
                       value={logo}
+                      storagePath={`restaurants/${restaurantId}/logo`}
                       aspectClass="aspect-square max-w-[140px]"
                       hint="Recomendado: imagem quadrada, mín. 200×200px"
                       onChange={setLogo}
@@ -403,6 +620,7 @@ export default function SettingsPage() {
                     <ImageUploader
                       label="Banner / Capa"
                       value={bannerImage}
+                      storagePath={`restaurants/${restaurantId}/banner`}
                       aspectClass="aspect-video"
                       hint="Será sobreposta com a cor do cabeçalho para legibilidade"
                       onChange={setBannerImage}
@@ -560,158 +778,6 @@ export default function SettingsPage() {
               </>
             )}
 
-            {/* ══ ABA: IMPRESSÃO ══ */}
-            {tab === 'impressao' && (
-              <>
-                <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
-                  <h3 className="mb-1 text-sm font-bold text-gray-700">🖨️ Configuração do Cupom</h3>
-                  <p className="mb-5 text-xs text-gray-400">
-                    Defina quais informações aparecem no cupom impresso na cozinha.
-                  </p>
-
-                  {/* Cabeçalho */}
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-3">
-                      <Field label="Texto do cabeçalho" hint='Ex: "COZINHA" ou "VIA PREPARO"'>
-                        <TextInput
-                          value={printConfig.headerText ?? ''}
-                          onChange={v => setPrintConfig(p => ({ ...p, headerText: v }))}
-                          placeholder="COZINHA"
-                        />
-                      </Field>
-                      <Field label="Texto do rodapé" hint="Opcional">
-                        <TextInput
-                          value={printConfig.footerText ?? ''}
-                          onChange={v => setPrintConfig(p => ({ ...p, footerText: v }))}
-                          placeholder="Obrigado!"
-                        />
-                      </Field>
-                    </div>
-
-                    {/* Papel e Fonte */}
-                    <div className="grid grid-cols-2 gap-3">
-                      <Field label="Largura do papel">
-                        <div className="flex gap-2">
-                          {(['58mm', '80mm'] as const).map(w => (
-                            <button key={w} onClick={() => setPrintConfig(p => ({ ...p, paperWidth: w }))}
-                              className={`flex-1 rounded-xl border-2 py-2.5 text-sm font-bold transition ${
-                                printConfig.paperWidth === w ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-500'
-                              }`}>
-                              {w}
-                            </button>
-                          ))}
-                        </div>
-                      </Field>
-                      <Field label="Tamanho da fonte">
-                        <div className="flex gap-2">
-                          {([
-                            { key: 'small',  label: 'P' },
-                            { key: 'normal', label: 'M' },
-                            { key: 'large',  label: 'G' },
-                          ] as const).map(f => (
-                            <button key={f.key} onClick={() => setPrintConfig(p => ({ ...p, fontSize: f.key }))}
-                              className={`flex-1 rounded-xl border-2 py-2.5 text-sm font-bold transition ${
-                                printConfig.fontSize === f.key ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-gray-200 text-gray-500'
-                              }`}>
-                              {f.label}
-                            </button>
-                          ))}
-                        </div>
-                      </Field>
-                    </div>
-
-                    <Field label="Número de vias" hint="Quantas cópias imprimir por pedido">
-                      <div className="flex items-center gap-4">
-                        <button onClick={() => setPrintConfig(p => ({ ...p, copies: Math.max(1, p.copies - 1) }))}
-                          className="flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 text-xl font-bold text-gray-600 hover:bg-gray-50">−</button>
-                        <span className="w-8 text-center text-lg font-black text-gray-800">{printConfig.copies}</span>
-                        <button onClick={() => setPrintConfig(p => ({ ...p, copies: Math.min(4, p.copies + 1) }))}
-                          className="flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 text-xl font-bold text-gray-600 hover:bg-gray-50">+</button>
-                      </div>
-                    </Field>
-                  </div>
-                </section>
-
-                {/* Campos a exibir */}
-                <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
-                  <h3 className="mb-4 text-sm font-bold text-gray-700">Dados a imprimir</h3>
-                  <div className="space-y-3">
-                    {([
-                      { key: 'showRestaurantName', label: 'Nome do restaurante' },
-                      { key: 'showOrderType',      label: 'Tipo de pedido (Mesa / Online / Marmita)' },
-                      { key: 'showDateTime',       label: 'Data e hora' },
-                      { key: 'showCustomerName',   label: 'Nome do cliente' },
-                      { key: 'showPhone',          label: 'Telefone do cliente' },
-                      { key: 'showAddress',        label: 'Endereço de entrega' },
-                      { key: 'showNotes',          label: 'Observações do pedido' },
-                      { key: 'showTotal',          label: 'Total do pedido' },
-                      { key: 'showSeparator',      label: 'Linha separadora entre itens' },
-                    ] as const).map(({ key, label }) => (
-                      <div key={key} className="flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
-                        <span className="text-sm text-gray-700">{label}</span>
-                        <div
-                          onClick={() => setPrintConfig(p => ({ ...p, [key]: !p[key] }))}
-                          className={`relative h-6 w-11 cursor-pointer rounded-full transition ${printConfig[key] ? 'bg-brand-500' : 'bg-gray-200'}`}
-                        >
-                          <span className={`absolute top-1 h-4 w-4 rounded-full bg-white shadow transition-transform ${printConfig[key] ? 'translate-x-6' : 'translate-x-1'}`} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-
-                {/* Preview e teste */}
-                <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-gray-100">
-                  <h3 className="mb-3 text-sm font-bold text-gray-700">🧾 Preview do cupom</h3>
-                  <div className="rounded-xl border border-gray-200 bg-gray-900 p-4 font-mono text-xs text-green-400 whitespace-pre overflow-x-auto">
-                    {(() => {
-                      const w = printConfig.paperWidth === '58mm' ? 32 : 48
-                      const div = '='.repeat(w)
-                      const div2 = '-'.repeat(w)
-                      const c = (t: string) => t.padStart(Math.floor((w + t.length) / 2)).padEnd(w)
-                      const lines = [
-                        div,
-                        printConfig.headerText ? c(printConfig.headerText) : null,
-                        printConfig.headerText ? div : null,
-                        printConfig.showRestaurantName ? c((restaurant?.name ?? 'Restaurante').toUpperCase()) : null,
-                        printConfig.showOrderType ? c('PEDIDO ONLINE') : null,
-                        printConfig.showOrderType ? c('JOAO SILVA') : null,
-                        printConfig.showDateTime ? c('09/04 14:35') : null,
-                        div,
-                        printConfig.showCustomerName ? 'Cliente: João Silva' : null,
-                        printConfig.showPhone ? 'Tel: (11) 99999-9999' : null,
-                        printConfig.showAddress ? 'ENTREGA: Rua das Flores, 123' : null,
-                        div2,
-                        'ITENS:',
-                        `  2x X-Burguer Artesanal`,
-                        printConfig.showSeparator ? div2 : null,
-                        `  1x Batata Frita G`,
-                        printConfig.showSeparator ? div2 : null,
-                        printConfig.showNotes ? 'OBS: Sem cebola, bem passado' : null,
-                        printConfig.showTotal ? `TOTAL: R$ 83,80` : null,
-                        printConfig.footerText ? div : null,
-                        printConfig.footerText ? c(printConfig.footerText) : null,
-                        div,
-                      ].filter(Boolean).join('\n')
-                      return lines
-                    })()}
-                  </div>
-                  <button
-                    onClick={() => printTicket({
-                      origin: 'online', identifier: 'João Silva', customerName: 'João Silva',
-                      phone: '(11) 99999-9999', address: 'Rua das Flores, 123', deliveryType: 'delivery',
-                      items: [{ name: 'X-Burguer Artesanal', qty: 2 }, { name: 'Batata Frita G', qty: 1 }],
-                      notes: 'Sem cebola', total: 83.80, createdAt: new Date(),
-                      restaurantName: restaurant?.name,
-                    }, printConfig)}
-                    className="mt-3 w-full rounded-xl border border-gray-200 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-50 transition"
-                  >
-                    🖨️ Imprimir cupom de teste
-                  </button>
-                </section>
-              </>
-            )}
-
             {/* ══ ABA: FINANCEIRO ══ */}
             {tab === 'financeiro' && (
               <>
@@ -742,6 +808,15 @@ export default function SettingsPage() {
                   </Field>
                 </section>
               </>
+            )}
+
+
+            {/* ══ ABA: IMPRESSÃO ══ */}
+            {tab === 'impressao' && (
+              <PrintSettingsTab
+                kitchenAgent={kitchenAgent}
+                centralAgent={centralAgent}
+              />
             )}
 
             {/* Botão salvar */}

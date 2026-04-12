@@ -20,8 +20,9 @@ import { usePrintAgent } from '@/hooks/usePrintAgent'
 import { PrintAgentFAB } from '@/components/PrintAgentPanel'
 import { updateOrderStatus, subscribeOrderItems } from '@/services/orders'
 import { subscribeMarmitaOrders, subscribeMarmitaOrderItems, updateMarmitaOrderStatus } from '@/services/marmitaria'
+import { subscribeOnlineOrders, subscribeOnlineOrderItems, updateOnlineOrderStatus } from '@/services/onlineOrders'
 import { useOrders } from '@/hooks/useOrders'
-import type { Order, OrderItem, MarmitaOrder, MarmitaOrderItem } from '@/types'
+import type { Order, OrderItem, MarmitaOrder, MarmitaOrderItem, OnlineOrder, OnlineOrderItem } from '@/types'
 
 // ─── Helpers de tempo ─────────────────────────────────────────────────────────
 
@@ -75,7 +76,9 @@ function OrderNumber({ id, prefix }: { id: string; prefix?: string }) {
 function KitchenCard({
   order, seqIndex, onReprint,
 }: {
-  order: Order; seqIndex: number; onReprint: (id: string) => void
+  order: Order
+  seqIndex: number
+  onReprint: (orderId: string, origin: 'mesa'|'marmita', label: string, seqIndex: number, deliveryInfo?: string, notes?: string, createdAt?: Date) => void
 }) {
   const [items, setItems]       = useState<OrderItem[]>([])
   const [updating, setUpdating] = useState(false)
@@ -114,7 +117,10 @@ function KitchenCard({
             <OrderNumber id={order.id} />
           </div>
           <button
-            onClick={() => onReprint(order.id)}
+            onClick={() => onReprint(
+              order.id, 'mesa', `Mesa ${order.tableNumber}`,
+              seqIndex, undefined, undefined, order.createdAt
+            )}
             className="shrink-0 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500 hover:bg-gray-50 active:scale-95"
           >
             🖨️ Reimprimir
@@ -158,7 +164,9 @@ function KitchenCard({
 function MarmitaKitchenCard({
   order, seqIndex, onReprint,
 }: {
-  order: MarmitaOrder; seqIndex: number; onReprint: (id: string) => void
+  order: MarmitaOrder
+  seqIndex: number
+  onReprint: (orderId: string, origin: 'mesa'|'marmita', label: string, seqIndex: number, deliveryInfo?: string, notes?: string, createdAt?: Date) => void
 }) {
   const [items, setItems]       = useState<MarmitaOrderItem[]>([])
   const [updating, setUpdating] = useState(false)
@@ -209,7 +217,12 @@ function MarmitaKitchenCard({
             </div>
           </div>
           <button
-            onClick={() => onReprint(order.id)}
+            onClick={() => {
+              const delivery = order.deliveryType === 'delivery'
+                ? `Entrega — ${order.address ?? ''}`
+                : 'Retirada'
+              onReprint(order.id, 'marmita', order.customerName, seqIndex, delivery, order.notes, order.createdAt)
+            }}
             className="shrink-0 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500 hover:bg-gray-50 active:scale-95"
           >
             🖨️ Reimprimir
@@ -254,11 +267,113 @@ function MarmitaKitchenCard({
   )
 }
 
+
+// ─── Card pedido online ────────────────────────────────────────────────────────
+
+function OnlineKitchenCard({
+  order, seqIndex, onReprint,
+}: {
+  order: OnlineOrder
+  seqIndex: number
+  onReprint: (orderId: string, origin: 'mesa'|'marmita', label: string, seqIndex: number, deliveryInfo?: string, notes?: string, createdAt?: Date) => void
+}) {
+  const [items, setItems]       = useState<OnlineOrderItem[]>([])
+  const [updating, setUpdating] = useState(false)
+  const elapsed                 = useElapsed(order.createdAt)
+  const isReady                 = ['ready', 'out_for_delivery', 'delivered'].includes(order.status)
+
+  useEffect(() => { return subscribeOnlineOrderItems(order.id, setItems) }, [order.id])
+
+  async function markReady() {
+    setUpdating(true)
+    await updateOnlineOrderStatus(order.id, 'ready')
+    setUpdating(false)
+  }
+
+  const borderColor = isReady
+    ? 'border-green-300 bg-green-50'
+    : elapsed >= 15 ? 'border-red-400 bg-red-50'
+    : elapsed >= 10 ? 'border-orange-300 bg-orange-50'
+    : 'border-blue-200 bg-white'
+
+  const typeInfo = order.deliveryType === 'delivery'
+    ? { icon: '🛵', label: 'Entrega', cls: 'bg-blue-100 text-blue-700' }
+    : { icon: '🏃', label: 'Retirada', cls: 'bg-teal-100 text-teal-700' }
+
+  return (
+    <div className={`flex rounded-2xl border-2 gap-3 p-4 transition-all ${borderColor}`}>
+      <div className="flex flex-col items-center justify-start pt-0.5 shrink-0">
+        <span className={`flex h-8 w-8 items-center justify-center rounded-full text-sm font-black ${isReady ? 'bg-green-200 text-green-700' : 'bg-blue-600 text-white'}`}>
+          {seqIndex}
+        </span>
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="mb-2 flex items-start justify-between gap-2 flex-wrap">
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold bg-blue-100 text-blue-700 rounded-full px-2 py-0.5">🌐 Online</span>
+              <span className="text-base font-black text-gray-900">{order.customerName}</span>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${typeInfo.cls}`}>
+                {typeInfo.icon} {typeInfo.label}
+              </span>
+              <UrgencyBadge elapsed={elapsed} status={order.status} />
+            </div>
+            <OrderNumber id={order.id} prefix="W" />
+          </div>
+          <button
+            onClick={() => {
+              const delivery = order.deliveryType === 'delivery'
+                ? `Entrega — ${order.address ?? ''}`
+                : 'Retirada'
+              onReprint(order.id, 'online', order.customerName, seqIndex, delivery, order.notes, order.createdAt)
+            }}
+            className="shrink-0 rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500 hover:bg-gray-50 active:scale-95"
+          >
+            🖨️ Reimprimir
+          </button>
+        </div>
+        <ul className="mb-3 space-y-1">
+          {items.map((item) => (
+            <li key={item.id} className="flex items-center gap-2 text-sm">
+              <span className="flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
+                {item.qty}
+              </span>
+              <span className="text-gray-800 font-medium">
+                {item.name}
+                {item.size && <span className="ml-1 text-xs text-gray-400">({item.size})</span>}
+              </span>
+            </li>
+          ))}
+        </ul>
+        {order.notes && (
+          <p className="mb-3 rounded-lg bg-amber-50 border border-amber-100 px-3 py-2 text-xs text-amber-800">
+            📝 {order.notes}
+          </p>
+        )}
+        {isReady ? (
+          <div className="rounded-xl bg-green-100 py-2 text-center text-sm font-semibold text-green-700">
+            ✅ Pronto — {order.deliveryType === 'delivery' ? 'aguardando entregador' : 'aguardando retirada'}
+          </div>
+        ) : (
+          <button
+            onClick={markReady}
+            disabled={updating}
+            className="w-full rounded-xl bg-green-500 py-2.5 text-sm font-bold text-white transition hover:bg-green-600 active:scale-95 disabled:opacity-50"
+          >
+            {updating ? '…' : '✅ Marcar como Pronto'}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Tipo da fila unificada ───────────────────────────────────────────────────
 
 type QueueItem =
   | { type: 'mesa';    order: Order;        createdAt: Date }
   | { type: 'marmita'; order: MarmitaOrder; createdAt: Date }
+  | { type: 'online';  order: OnlineOrder;  createdAt: Date }
 
 // ─── Página principal ─────────────────────────────────────────────────────────
 
@@ -267,10 +382,12 @@ export default function KitchenPage() {
   const { orders, loading }    = useOrders(['new', 'preparing', 'ready'])
   const { notify, subscribed } = usePushNotification()
   const prevOrderIds           = useRef<Set<string>>(new Set())
-  const agent                  = usePrintAgent(restaurantId ?? '')
+  const agent                  = usePrintAgent(restaurantId ?? '', 'kitchen')
 
   const [marmitaOrders, setMarmitaOrders]   = useState<MarmitaOrder[]>([])
   const [marmitaLoading, setMarmitaLoading] = useState(true)
+  const [onlineOrders, setOnlineOrders]     = useState<OnlineOrder[]>([])
+  const [onlineLoading, setOnlineLoading]   = useState(true)
   const [filter, setFilter]                 = useState<'all' | 'pending' | 'ready'>('all')
 
   useEffect(() => {
@@ -279,6 +396,15 @@ export default function KitchenPage() {
       restaurantId,
       ['new', 'preparing', 'ready'],
       (data) => { setMarmitaOrders(data); setMarmitaLoading(false) },
+    )
+  }, [restaurantId])
+
+  useEffect(() => {
+    if (!restaurantId) return
+    return subscribeOnlineOrders(
+      restaurantId,
+      (data) => { setOnlineOrders(data); setOnlineLoading(false) },
+      ['preparing', 'ready'],   // Kitchen só vê online orders APÓS confirmação pela central
     )
   }, [restaurantId])
 
@@ -293,30 +419,65 @@ export default function KitchenPage() {
     prevOrderIds.current = new Set(orders.map((o) => o.id))
   }, [orders, loading, subscribed, notify])
 
-  // Reimprimir — reseta o job na fila de impressão
-  const handleReprint = useCallback(async (orderId: string) => {
+  // Reimprimir — gera ticket de cozinha direto com itens em tempo real
+  const handleReprint = useCallback(async (
+    orderId: string,
+    origin: 'mesa' | 'marmita' | 'online',
+    label: string,
+    seqIndex: number,
+    deliveryInfo?: string,
+    notes?: string,
+    createdAt?: Date,
+  ) => {
     if (!restaurantId) return
     try {
-      const [{ resetToPending }, { getDocs, query, collection, where }, { db }] = await Promise.all([
-        import('@/services/printQueue'),
+      const [
+        { buildKitchenHTML },
+        { BrowserPrinter, loadPrinterConfig },
+        { getDocs, query, collection, where },
+        { db },
+      ] = await Promise.all([
+        import('@/services/printEngine'),
+        import('@/services/printEngine'),
         import('firebase/firestore'),
         import('@/services/firebase'),
       ])
-      // Inclui restaurantId para satisfazer a regra de segurança do Firestore
+
+      // Busca itens em tempo real da collection correta
+      const collName = origin === 'mesa'
+        ? 'order_items'
+        : origin === 'online'
+        ? 'online_order_items'
+        : 'marmita_order_items'
+      const fieldName = origin === 'mesa'
+        ? 'orderId'
+        : origin === 'online'
+        ? 'onlineOrderId'
+        : 'marmitaOrderId'
       const snap = await getDocs(
-        query(
-          collection(db, 'print_queue'),
-          where('restaurantId', '==', restaurantId),
-          where('orderId', '==', orderId),
-        )
+        query(collection(db, collName), where(fieldName, '==', orderId))
       )
-      if (!snap.empty) {
-        await resetToPending(snap.docs[0].id)
-      } else {
-        // Job não existe ainda — cria um novo diretamente via printQueue
-        const { createPrintJob } = await import('@/services/printQueue')
-        console.warn('Reprint: job não encontrado para', orderId)
-      }
+      const items = snap.docs.map((d) => {
+        const x = d.data()
+        return { name: x.name as string, qty: x.qty as number, size: x.size as string | undefined }
+      })
+
+      const cfg = loadPrinterConfig()
+      const html = buildKitchenHTML({
+        seqIndex,
+        orderId,
+        origin,
+        label,
+        deliveryInfo,
+        notes,
+        items,
+        createdAt:      createdAt ?? new Date(),
+        restaurantName: cfg.restaurantName,
+      })
+
+      // Imprime via iframe (sem popup)
+      const printer = new BrowserPrinter(cfg, () => {})
+      await printer.sendHTML(html)
     } catch (e) {
       console.error('Reprint error:', e)
     }
@@ -326,23 +487,25 @@ export default function KitchenPage() {
   const allItems: QueueItem[] = [
     ...orders.map((o): QueueItem => ({ type: 'mesa', order: o, createdAt: o.createdAt })),
     ...marmitaOrders.map((o): QueueItem => ({ type: 'marmita', order: o, createdAt: o.createdAt })),
+    ...onlineOrders.map((o): QueueItem => ({ type: 'online', order: o, createdAt: o.createdAt })),
   ].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
 
   const pendingItems = allItems.filter((i) => ['new', 'preparing'].includes(i.order.status))
-  const readyItems   = allItems.filter((i) => ['ready', 'out_for_delivery'].includes(i.order.status))
+  const readyItems   = allItems.filter((i) =>
+    ['ready', 'out_for_delivery'].includes(i.order.status))
 
   const displayed = filter === 'pending' ? pendingItems
                   : filter === 'ready'   ? readyItems
                   : allItems
 
-  const isLoading   = loading && marmitaLoading
-  const totalActive = orders.length + marmitaOrders.length
+  const isLoading   = loading && marmitaLoading && onlineLoading
+  const totalActive = orders.length + marmitaOrders.length + onlineOrders.length
 
   return (
     <Layout>
       <PageHeader
         title="Cozinha"
-        subtitle={`${pendingItems.length} em preparo · ${readyItems.length} pronto${readyItems.length !== 1 ? 's' : ''}`}
+        subtitle={`${pendingItems.length} em preparo · ${readyItems.length} pronto${readyItems.length !== 1 ? 's' : ''} · ${onlineOrders.length} online`}
         action={<NotificationBell />}
       />
 
@@ -400,14 +563,21 @@ export default function KitchenPage() {
             item.type === 'mesa' ? (
               <KitchenCard
                 key={item.order.id}
-                order={item.order}
+                order={item.order as Order}
+                seqIndex={idx + 1}
+                onReprint={handleReprint}
+              />
+            ) : item.type === 'online' ? (
+              <OnlineKitchenCard
+                key={item.order.id}
+                order={item.order as OnlineOrder}
                 seqIndex={idx + 1}
                 onReprint={handleReprint}
               />
             ) : (
               <MarmitaKitchenCard
                 key={item.order.id}
-                order={item.order}
+                order={item.order as MarmitaOrder}
                 seqIndex={idx + 1}
                 onReprint={handleReprint}
               />

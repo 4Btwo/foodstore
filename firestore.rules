@@ -7,78 +7,95 @@ service cloud.firestore {
     function hasRole(role) { return isAuthenticated() && getUserData().role == role; }
     function isAdmin() { return hasRole('admin'); }
     function isSuperAdmin() { return hasRole('superadmin'); }
-    function belongsToRestaurant(restaurantId) { return isAuthenticated() && getUserData().restaurantId == restaurantId; }
-    function isAdminOf(restaurantId) { return isAdmin() && belongsToRestaurant(restaurantId); }
+    function isKitchen() { return hasRole('kitchen'); }
+    function isCashier() { return hasRole('cashier'); }
+    function isWaiter() { return hasRole('waiter'); }
     function isDelivery() { return hasRole('delivery'); }
+    function belongsToRestaurant(restaurantId) {
+      return isAuthenticated() && getUserData().restaurantId == restaurantId;
+    }
+    function isAdminOf(restaurantId) { return isAdmin() && belongsToRestaurant(restaurantId); }
+    function isStaffOf(restaurantId) {
+      return isAuthenticated() && belongsToRestaurant(restaurantId);
+    }
     function hasSuperAccess() { return isSuperAdmin(); }
 
     match /restaurants/{restaurantId} {
       allow read:  if hasSuperAccess() || belongsToRestaurant(restaurantId);
       allow write: if hasSuperAccess() || isAdminOf(restaurantId);
     }
+
     match /users/{userId} {
       allow read:   if hasSuperAccess() || request.auth.uid == userId || isAdmin();
       allow create: if hasSuperAccess() || isAdmin();
       allow update: if hasSuperAccess() || isAdmin() || request.auth.uid == userId;
       allow delete: if hasSuperAccess() || isAdmin();
     }
+
     match /products/{productId} {
       allow read:  if hasSuperAccess() || belongsToRestaurant(resource.data.restaurantId) || resource.data.active == true;
       allow write: if hasSuperAccess() || isAdminOf(resource.data.restaurantId)
                    || (request.resource != null && isAdminOf(request.resource.data.restaurantId));
     }
+
     match /tables/{tableId} {
       allow read:  if hasSuperAccess() || belongsToRestaurant(resource.data.restaurantId);
       allow write: if hasSuperAccess() || (isAuthenticated() && belongsToRestaurant(resource.data.restaurantId));
     }
+
     match /orders/{orderId} {
-      allow read:   if hasSuperAccess() || belongsToRestaurant(resource.data.restaurantId);
+      allow read:   if hasSuperAccess() || isStaffOf(resource.data.restaurantId);
       allow create: if hasSuperAccess() || (isAuthenticated() && belongsToRestaurant(request.resource.data.restaurantId));
-      allow update: if hasSuperAccess() || (isAuthenticated() && belongsToRestaurant(resource.data.restaurantId));
+      allow update: if hasSuperAccess() || (isAuthenticated() && isStaffOf(resource.data.restaurantId));
       allow delete: if hasSuperAccess() || isAdminOf(resource.data.restaurantId);
     }
+
     match /order_items/{itemId} {
       allow read, write: if hasSuperAccess() || isAuthenticated();
     }
+
     match /tableCalls/{callId} {
       allow create: if true;
       allow read, update, delete: if hasSuperAccess() || (isAuthenticated() && belongsToRestaurant(resource.data.restaurantId));
     }
+
     match /daily_dishes/{dishId} {
-      allow read: if hasSuperAccess() || belongsToRestaurant(resource.data.restaurantId);
+      allow read:  if hasSuperAccess() || belongsToRestaurant(resource.data.restaurantId);
       allow create: if hasSuperAccess() || (isAuthenticated() && isAdminOf(request.resource.data.restaurantId));
       allow update, delete: if hasSuperAccess() || (isAuthenticated() && isAdminOf(resource.data.restaurantId));
     }
+
     match /marmita_orders/{orderId} {
-      allow read:   if hasSuperAccess() || belongsToRestaurant(resource.data.restaurantId);
+      allow read:   if hasSuperAccess() || isStaffOf(resource.data.restaurantId);
       allow create: if hasSuperAccess() || (isAuthenticated() && belongsToRestaurant(request.resource.data.restaurantId));
-      allow update: if hasSuperAccess() || (isAuthenticated() && belongsToRestaurant(resource.data.restaurantId));
+      allow update: if hasSuperAccess() || (isAuthenticated() && isStaffOf(resource.data.restaurantId));
       allow delete: if hasSuperAccess() || isAdminOf(resource.data.restaurantId);
     }
+
     match /marmita_order_items/{itemId} {
       allow read, write: if hasSuperAccess() || isAuthenticated();
     }
-    // Pedidos online (link público — cliente não precisa de login)
+
+    // Pedidos online — cliente cria sem login, staff lê e atualiza
     match /online_orders/{orderId} {
       allow create: if true;
-      allow read:   if hasSuperAccess() || isAdminOf(resource.data.restaurantId);
-      allow update: if hasSuperAccess() || isAdminOf(resource.data.restaurantId);
+      allow read:   if hasSuperAccess() || isStaffOf(resource.data.restaurantId);
+      allow update: if hasSuperAccess() || isStaffOf(resource.data.restaurantId);
       allow delete: if hasSuperAccess() || isAdminOf(resource.data.restaurantId);
     }
+
     match /online_order_items/{itemId} {
       allow create: if true;
       allow read:   if hasSuperAccess() || isAuthenticated();
       allow write:  if hasSuperAccess() || isAuthenticated();
     }
 
-    // Fila de impressão automática
-    // Simplificado: qualquer usuário autenticado pode ler/escrever
-    // (a filtragem por restaurantId é feita na query, não na regra)
+    // Fila de impressão — qualquer staff autenticado
     match /print_queue/{jobId} {
       allow read, write: if hasSuperAccess() || isAuthenticated();
     }
 
-        // Corridas do entregador
+    // Corridas do entregador
     match /delivery_runs/{runId} {
       allow read: if hasSuperAccess() || (isAuthenticated() && (
         belongsToRestaurant(resource.data.restaurantId) ||

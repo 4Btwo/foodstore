@@ -15,7 +15,7 @@ import { useAuth } from '@/hooks/useAuth'
 
 export default function PrintAgentPage() {
   const { user }  = useAuth()
-  const agent     = usePrintAgent(user?.restaurantId ?? '')
+  const agent     = usePrintAgent(user?.restaurantId ?? '', 'kitchen')
 
   if (!user) return null
 

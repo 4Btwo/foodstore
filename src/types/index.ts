@@ -256,4 +256,7 @@ export interface UnifiedOrder {
   createdAt: Date
 }
 // ─── Impressão automática ────────────────────────────────────────────────────
-export type { PrintJob, PrintJobStatus, PrinterConfig, PrinterConnectionStatus } from './print'
+export type {
+  PrintJob, PrintJobStatus, PrinterConfig, PrinterConnectionStatus,
+  PrinterTarget, TicketType, TicketTemplate, PrintTemplates,
+} from './print'

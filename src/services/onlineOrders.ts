@@ -96,3 +96,14 @@ export function subscribeOnlineOrderItems(
     callback(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as OnlineOrderItem))
   })
 }
+
+// ─── Atualizar status de pedido online ────────────────────────────────────────
+
+export async function updateOnlineOrderStatus(
+  orderId: string,
+  status: OnlineOrderStatus,
+): Promise<void> {
+  const { doc, updateDoc } = await import('firebase/firestore')
+  const { db } = await import('./firebase')
+  await updateDoc(doc(db, 'online_orders', orderId), { status })
+}

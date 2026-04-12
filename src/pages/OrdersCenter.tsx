@@ -29,9 +29,16 @@ import {
 } from '@/services/unifiedOrders'
 import { subscribeUsers } from '@/services/users'
 import { subscribeAllProducts } from '@/services/productsAdmin'
+import { closeTableOrders, subscribeOrderItems, updateTableStatus } from '@/services/orders'
+import { createJobsOnConfirm, createBillJob, createMesaBillJob } from '@/services/printQueue'
+import { useTables } from '@/hooks/useTables'
+import { PixModal } from '@/components/PixModal'
+import { doc, getDoc } from 'firebase/firestore'
+import { db } from '@/services/firebase'
+import { buildBillHTML, BrowserPrinter, loadPrinterConfig } from '@/services/printEngine'
 import type {
   UnifiedOrder, UnifiedOrderStatus, UnifiedOrderOrigin,
-  AppUser, Product, ProductSize,
+  AppUser, Product, ProductSize, OrderItem, Table,
 } from '@/types'
 
 // ─── Configurações visuais por origem ────────────────────────────────────────
@@ -57,6 +64,195 @@ const STATUS_CFG: Record<UnifiedOrderStatus, { label: string; pill: string }> = 
 const DONE: UnifiedOrderStatus[] = ['delivered', 'closed', 'cancelled']
 
 // ─── Modal de atribuição de entregador ───────────────────────────────────────
+
+
+// ─── Modal de fechamento de conta (migrado do Caixa/PDV) ─────────────────────
+
+type PaymentMethod = 'Dinheiro' | 'Cartão Débito' | 'Cartão Crédito' | 'PIX' | 'Outro'
+
+function BillModal({
+  order, restaurantId, onClose,
+}: {
+  order:        UnifiedOrder
+  restaurantId: string
+  onClose:      () => void
+}) {
+  const [allItems, setAllItems]         = useState<OrderItem[]>([])
+  const [serviceRate, setServiceRate]   = useState(0.10)
+  const [closing, setClosing]           = useState(false)
+  const [showPix, setShowPix]           = useState(false)
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null)
+
+  // Carrega taxa de serviço do restaurante
+  useEffect(() => {
+    getDoc(doc(db, 'restaurants', restaurantId)).then((snap) => {
+      if (snap.exists()) setServiceRate(snap.data().serviceRate ?? 0.10)
+    })
+  }, [restaurantId])
+
+  // Carrega itens de todos os pedidos da mesa
+  useEffect(() => {
+    if (order.origin === 'mesa' && order.originId) {
+      const unsub = subscribeOrderItems(order.originId, (items) => {
+        setAllItems(items)
+      })
+      return unsub
+    } else {
+      // Para balcão/marmita/online — usa itens do UnifiedOrder diretamente
+      setAllItems(
+        order.items.map((i, idx) => ({
+          id: String(idx),
+          orderId: order.originId,
+          productId: '',
+          name: i.name,
+          qty: i.qty,
+          price: i.price,
+          size: i.size,
+        }))
+      )
+    }
+  }, [order.originId, order.origin])
+
+  const subtotal = allItems.reduce((s, i) => s + i.price * i.qty, 0)
+  const service  = subtotal * serviceRate
+  const total    = subtotal + service
+
+  // Impressão delegada à fila — handleClose cria o job automaticamente
+
+  async function handleClose(method: PaymentMethod) {
+    setClosing(true)
+    try {
+      // Cria job de cupom financeiro na fila da impressora central
+      await createBillJob(order, method, serviceRate).catch(console.error)
+      if (order.origin === 'mesa') {
+        await closeTableOrders(restaurantId, order.tableNumber!, [order.originId])
+      } else {
+        await advanceOrder(order)
+      }
+      onClose()
+    } finally {
+      setClosing(false)
+    }
+  }
+
+  const PAYMENT_METHODS: PaymentMethod[] = [
+    'Dinheiro', 'Cartão Débito', 'Cartão Crédito', 'PIX', 'Outro',
+  ]
+
+  if (showPix) {
+    return (
+      <PixModal
+        orderId={order.originId}
+        restaurantId={restaurantId}
+        tableNumber={order.tableNumber ?? 0}
+        onSuccess={onClose}
+        onClose={() => setShowPix(false)}
+      />
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-4">
+      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl overflow-hidden">
+
+        {/* Cabeçalho */}
+        <div className="flex items-center justify-between px-5 py-4 border-b">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">
+              🧾 {order.origin === 'mesa' ? `Mesa ${order.tableNumber}` : (order.customerName ?? 'Pedido')}
+            </h2>
+            <p className="text-xs text-gray-400">#{order.originId.slice(-4).toUpperCase()} · Fechamento de conta</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+        </div>
+
+        {/* Itens */}
+        <div className="max-h-48 overflow-y-auto divide-y divide-gray-50 border-b">
+          {allItems.length === 0 ? (
+            <p className="px-5 py-3 text-sm text-amber-600">⚠️ Nenhum item encontrado</p>
+          ) : allItems.map((item, i) => (
+            <div key={i} className="flex items-center justify-between px-5 py-2.5 text-sm">
+              <span className="text-gray-700">{item.qty}× {item.name}{item.size ? ` (${item.size})` : ''}</span>
+              <span className="font-medium text-gray-800">R$ {(item.price * item.qty).toFixed(2)}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Totais */}
+        {allItems.length > 0 && (
+          <div className="px-5 py-3 bg-gray-50 space-y-1.5 border-b">
+            <div className="flex justify-between text-sm text-gray-600">
+              <span>Subtotal</span>
+              <span>R$ {subtotal.toFixed(2)}</span>
+            </div>
+            {serviceRate > 0 && (
+              <div className="flex justify-between text-sm text-gray-500">
+                <span>Taxa de serviço ({(serviceRate * 100).toFixed(0)}%)</span>
+                <span>R$ {service.toFixed(2)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-base font-bold text-gray-900 pt-1 border-t border-gray-200">
+              <span>Total</span>
+              <span>R$ {total.toFixed(2)}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Formas de pagamento */}
+        <div className="px-5 py-4 border-b">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Forma de pagamento</p>
+          <div className="grid grid-cols-3 gap-2">
+            {PAYMENT_METHODS.map((m) => (
+              <button
+                key={m}
+                onClick={() => setPaymentMethod(m)}
+                className={`rounded-xl py-2.5 text-xs font-semibold border-2 transition ${
+                  paymentMethod === m
+                    ? 'border-brand-500 bg-brand-50 text-brand-700'
+                    : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                }`}
+              >
+                {m === 'Dinheiro' ? '💵' : m === 'PIX' ? '📱' : m.startsWith('Cartão') ? '💳' : '📝'} {m}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Ações */}
+        <div className="px-5 py-4 flex flex-col gap-2">
+          {paymentMethod && (
+            <button
+              onClick={() => handleClose(paymentMethod)}
+              disabled={closing || printing}
+              className="w-full rounded-xl bg-green-600 py-3 text-sm font-bold text-white hover:bg-green-700 disabled:opacity-50"
+            >
+              {closing ? '…' : `✅ Fechar e imprimir · ${paymentMethod}`}
+            </button>
+          )}
+          <button
+            onClick={() => setShowPix(true)}
+            className="w-full rounded-xl bg-blue-500 py-2.5 text-sm font-semibold text-white hover:bg-blue-600"
+          >
+            📱 Cobrar via PIX
+          </button>
+          {paymentMethod && (
+            <button
+              onClick={() => handlePrintBill(paymentMethod)}
+              
+              className="w-full rounded-xl border border-gray-200 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            >
+              🖨️ Reimprimir cupom
+            </button>
+          )}
+          <button onClick={onClose} className="w-full rounded-xl border border-gray-200 py-2 text-sm text-gray-400">
+            Cancelar
+          </button>
+        </div>
+
+      </div>
+    </div>
+  )
+}
 
 function AssignModal({
   order, deliverers, onClose,
@@ -317,11 +513,12 @@ function NewBalcaoModal({
 // ─── Card de pedido ───────────────────────────────────────────────────────────
 
 function OrderCard({
-  order, deliverers, onAssign,
+  order, deliverers, onAssign, onBill,
 }: {
   order:      UnifiedOrder
   deliverers: AppUser[]
   onAssign:   (order: UnifiedOrder) => void
+  onBill:     (order: UnifiedOrder) => void
 }) {
   const [expanded, setExpanded]   = useState(true)
   const [acting, setActing]       = useState(false)
@@ -331,11 +528,13 @@ function OrderCard({
   const st  = STATUS_CFG[order.status]
 
   async function handleAdvance() {
-    // Se precisa de entregador, abre modal
-    if (
-      order.status === 'ready' &&
-      order.deliveryType === 'delivery'
-    ) {
+    // Mesa pronta → abre modal de fechamento de conta
+    if (order.status === 'ready' && order.origin === 'mesa') {
+      onBill(order)
+      return
+    }
+    // Delivery pronto → abre modal de atribuição de entregador
+    if (order.status === 'ready' && order.deliveryType === 'delivery') {
       onAssign(order)
       return
     }
@@ -347,6 +546,8 @@ function OrderCard({
   async function handleConfirm() {
     setActing(true)
     await confirmOrder(order)
+    // Dispara jobs de impressão para os alvos corretos
+    createJobsOnConfirm(order).catch(console.error)
     setActing(false)
   }
 
@@ -492,7 +693,7 @@ const ORIGIN_FILTERS: Array<{ key: UnifiedOrderOrigin | 'all'; label: string; ic
 
 export default function OrdersCenterPage() {
   const { restaurantId }          = useAuth()
-  const agent                     = usePrintAgent(restaurantId ?? '')
+  const agent                     = usePrintAgent(restaurantId ?? '', 'central')
   const [orders, setOrders]       = useState<UnifiedOrder[]>([])
   const [deliverers, setDeliverers] = useState<AppUser[]>([])
   const [products, setProducts]   = useState<Product[]>([])
@@ -500,6 +701,7 @@ export default function OrdersCenterPage() {
   const [filter, setFilter]       = useState<UnifiedOrderOrigin | 'all'>('all')
   const [tab, setTab]             = useState<'active' | 'done'>('active')
   const [assignTarget, setAssignTarget] = useState<UnifiedOrder | null>(null)
+  const [billTarget,   setBillTarget]   = useState<UnifiedOrder | null>(null)
   const [showBalcao, setShowBalcao]     = useState(false)
 
   useEffect(() => {
@@ -616,6 +818,7 @@ export default function OrdersCenterPage() {
                 order={order}
                 deliverers={deliverers}
                 onAssign={setAssignTarget}
+                onBill={setBillTarget}
               />
             ))}
           </div>
@@ -623,6 +826,13 @@ export default function OrdersCenterPage() {
       </div>
 
       {/* Modais */}
+      {billTarget && restaurantId && (
+        <BillModal
+          order={billTarget}
+          restaurantId={restaurantId}
+          onClose={() => setBillTarget(null)}
+        />
+      )}
       {assignTarget && (
         <AssignModal
           order={assignTarget}

@@ -109,13 +109,43 @@ function OrderCard({ order }: { order: OnlineOrder }) {
             {order.phone && (
               <div className="rounded-xl bg-white p-3">
                 <p className="font-bold text-gray-400 mb-0.5">Telefone</p>
-                <a href={`tel:${order.phone}`} className="font-semibold text-blue-600">{order.phone}</a>
+                <div className="flex items-center gap-2">
+                  <a href={`tel:${order.phone}`} className="font-semibold text-blue-600">{order.phone}</a>
+                  <a
+                    href={`https://wa.me/55${order.phone.replace(/\D/g,'')}`}
+                    target="_blank" rel="noreferrer"
+                    className="rounded-lg bg-green-100 px-2 py-0.5 text-[10px] font-bold text-green-700 hover:bg-green-200"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    WhatsApp
+                  </a>
+                </div>
+              </div>
+            )}
+            {(order as any).paymentMethod && (
+              <div className="rounded-xl bg-white p-3">
+                <p className="font-bold text-gray-400 mb-0.5">Pagamento</p>
+                <p className="font-semibold">
+                  {(order as any).paymentMethod === 'cash'
+                    ? `💵 Dinheiro${(order as any).changeFor ? ` · troco p/ R$ ${Number((order as any).changeFor).toFixed(2)}` : ' exato'}`
+                    : (order as any).paymentMethod === 'pix'
+                    ? '⚡ PIX'
+                    : '💳 Cartão (motoboy)'}
+                </p>
               </div>
             )}
             {order.deliveryType === 'delivery' && order.address && (
               <div className="rounded-xl bg-white p-3 col-span-2">
                 <p className="font-bold text-gray-400 mb-0.5">Endereço</p>
-                <p className="font-semibold">{order.address}</p>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-semibold flex-1">{order.address}</p>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(order.address!) }}
+                    className="shrink-0 text-brand-500 hover:underline text-[10px]"
+                  >
+                    Copiar
+                  </button>
+                </div>
               </div>
             )}
             {order.notes && (
