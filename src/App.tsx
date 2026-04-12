@@ -4,7 +4,7 @@ import { ProtectedRoute } from '@/components/ProtectedRoute'
 import LoginPage             from '@/pages/Login'
 import TablesPage            from '@/pages/Tables'
 import KitchenPage           from '@/pages/Kitchen'
-import CashierPage           from '@/pages/Cashier'
+
 import OrdersPage            from '@/pages/Orders'
 import QrCodesPage           from '@/pages/QrCodes'
 import DashboardPage         from '@/pages/Dashboard'
@@ -17,6 +17,7 @@ import { UnauthorizedPage }  from '@/pages/Placeholders'
 import MarmitariaAdminPage   from '@/pages/MarmitariaAdmin'
 import DeliveryDashboardPage from '@/pages/DeliveryDashboard'
 import OnlineOrderPage       from '@/pages/OnlineOrder'
+import StoreFrontPage        from '@/pages/StoreFront'
 import SuperAdminPage        from '@/pages/SuperAdmin'
 import OrdersCenterPage        from '@/pages/OrdersCenter'
 import OnlineOrdersDashboard   from '@/pages/OnlineOrdersDashboard'
@@ -53,7 +54,6 @@ export default function App() {
           {/* ── Operação (mantidos para acesso direto se necessário) ── */}
           <Route path="/tables"  element={<ProtectedRoute allowedRoles={['admin', 'waiter', 'cashier']}><TablesPage /></ProtectedRoute>} />
           <Route path="/kitchen" element={<ProtectedRoute allowedRoles={['admin', 'kitchen']}><KitchenPage /></ProtectedRoute>} />
-          <Route path="/cashier" element={<ProtectedRoute allowedRoles={['admin', 'cashier']}><CashierPage /></ProtectedRoute>} />
           <Route path="/orders"  element={<ProtectedRoute allowedRoles={['admin', 'waiter']}><OrdersPage /></ProtectedRoute>} />
 
           {/* ── Marmitaria (admin apenas — configuração de pratos) ── */}
@@ -68,6 +68,7 @@ export default function App() {
           {/* ── Público ── */}
           <Route path="/menu/:restaurantId/:table" element={<CustomerMenuPage />} />
           <Route path="/pedido/:restaurantId"      element={<OnlineOrderPage />} />
+          <Route path="/loja"                      element={<StoreFrontPage />} />
           <Route path="/qrcodes" element={<ProtectedRoute allowedRoles={['admin']}><QrCodesPage /></ProtectedRoute>} />
 
           <Route path="/" element={<Navigate to="/login" replace />} />

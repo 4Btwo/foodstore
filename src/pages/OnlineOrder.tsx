@@ -1,13 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { getProductsByRestaurant } from '@/services/products'
 import { createOnlineOrder } from '@/services/onlineOrders'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '@/services/firebase'
-import type { Product, ProductSize, Restaurant, OnlinePaymentMethod } from '@/types'
-import { createOnlinePixPayment, checkOnlinePaymentStatus } from '@/services/payments'
+import type { Product, ProductSize, Restaurant } from '@/types'
 
-type Step = 'menu' | 'cart' | 'info' | 'payment' | 'pix_qr' | 'success'
+type Step = 'menu' | 'cart' | 'info' | 'success'
 type CartItem = { product: Product; qty: number; size?: string; unitPrice: number }
 type DeliveryType = 'pickup' | 'delivery'
 
@@ -105,17 +104,6 @@ function ProductCard({
                 <span className="w-5 text-center text-sm font-bold">{cartQty}</span>
                 <button onClick={onAdd} className="flex h-9 w-9 items-center justify-center rounded-full text-lg font-bold text-white" style={{ background: color }}>+</button>
               </div>
-            ) : hasSizes && cartQty > 0 ? (
-              <div className="flex items-center gap-2 w-full justify-between">
-                <span className="text-xs text-gray-500">{cartQty} no carrinho</span>
-                <button
-                  onClick={onAddWithSizes}
-                  className={`flex items-center gap-1 ${btnRadius} px-3 py-1.5 text-xs font-bold text-white transition active:scale-95`}
-                  style={{ background: color }}
-                >
-                  <span>+</span> Adicionar
-                </button>
-              </div>
             ) : (
               <button
                 onClick={hasSizes ? onAddWithSizes : onAdd}
@@ -127,191 +115,6 @@ function ProductCard({
             )}
           </div>
         )}
-      </div>
-    </div>
-  )
-}
-
-// ─── Tela de QR Code PIX (real — conectada ao backend) ──────────────────────
-function PixQRView({
-  orderId, restaurantId, total, color,
-  onConfirmed, onBack,
-}: {
-  orderId: string; restaurantId: string; total: number; color: string
-  onConfirmed: () => void; onBack: () => void
-}) {
-  const [state, setState]       = useState<'loading' | 'ready' | 'approved' | 'error'>('loading')
-  const [qrBase64, setQrBase64] = useState('')
-  const [pixKey, setPixKey]     = useState('')
-  const [realTotal, setRealTotal] = useState(total)
-  const [errMsg, setErrMsg]     = useState('')
-  const [copied, setCopied]     = useState(false)
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function load() {
-      try {
-        const res = await createOnlinePixPayment({ orderId, restaurantId })
-        if (cancelled) return
-        setQrBase64(res.qrCodeBase64)
-        setPixKey(res.pixKey || res.qrCode)
-        setRealTotal(res.total)
-        setState('ready')
-
-        // Inicia polling somente para provedores com webhook (MP e PagBank)
-        if (res.provider !== 'static') {
-          pollRef.current = setInterval(async () => {
-            try {
-              const s = await checkOnlinePaymentStatus(orderId)
-              if (s.paymentStatus === 'approved') {
-                clearInterval(pollRef.current!)
-                setState('approved')
-                setTimeout(onConfirmed, 1500)
-              }
-            } catch { /* silencioso */ }
-          }, 5000)
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setErrMsg(err instanceof Error ? err.message : 'Erro ao gerar PIX')
-          setState('error')
-        }
-      }
-    }
-
-    load()
-    return () => {
-      cancelled = true
-      if (pollRef.current) clearInterval(pollRef.current)
-    }
-  }, [orderId, restaurantId])
-
-  function copyKey() {
-    navigator.clipboard.writeText(pixKey).then(() => {
-      setCopied(true); setTimeout(() => setCopied(false), 2000)
-    })
-  }
-
-  // ── Aprovado automaticamente ──────────────────────────────────────────────
-  if (state === 'approved') return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-gray-50 px-6 text-center">
-      <div className="flex h-24 w-24 items-center justify-center rounded-full bg-green-100 text-5xl">✅</div>
-      <p className="text-xl font-black text-gray-900">Pagamento confirmado!</p>
-      <p className="text-sm text-gray-500">Seu pedido já está sendo preparado.</p>
-    </div>
-  )
-
-  // ── Erro ──────────────────────────────────────────────────────────────────
-  if (state === 'error') return (
-    <div className="flex min-h-screen flex-col bg-gray-50">
-      <div className="sticky top-0 z-10 bg-white px-4 py-4 shadow-sm flex items-center gap-3">
-        <button onClick={onBack} className="flex h-9 w-9 items-center justify-center rounded-xl bg-gray-100 text-gray-600 text-lg">←</button>
-        <p className="font-bold text-gray-900">Pagar com PIX</p>
-      </div>
-      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
-        <span className="text-5xl">⚠️</span>
-        <p className="text-sm text-red-600 font-medium">{errMsg}</p>
-        <button onClick={onBack} className="rounded-2xl border border-gray-200 px-6 py-3 text-sm font-bold text-gray-600">
-          ← Escolher outro método
-        </button>
-      </div>
-    </div>
-  )
-
-  return (
-    <div className="flex min-h-screen flex-col bg-gray-50">
-      <div className="sticky top-0 z-10 bg-white px-4 py-4 shadow-sm flex items-center gap-3">
-        <button onClick={onBack} className="flex h-9 w-9 items-center justify-center rounded-xl bg-gray-100 text-gray-600 text-lg">←</button>
-        <div>
-          <p className="font-bold text-gray-900">Pagar com PIX</p>
-          <p className="text-xs text-gray-500">Escaneie o QR Code ou copie a chave</p>
-        </div>
-      </div>
-
-      <div className="flex-1 p-4 pb-36">
-        <div className="mx-auto max-w-md space-y-4">
-
-          {/* Valor */}
-          <div className="rounded-2xl bg-white p-5 shadow-sm text-center">
-            <p className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-1">Total a pagar</p>
-            <p className="text-3xl font-black" style={{ color }}>R$ {realTotal.toFixed(2)}</p>
-          </div>
-
-          {state === 'loading' ? (
-            <div className="rounded-2xl bg-white p-10 shadow-sm flex flex-col items-center gap-4">
-              <div className="h-10 w-10 animate-spin rounded-full border-4 border-t-transparent" style={{ borderColor: color, borderTopColor: 'transparent' }} />
-              <p className="text-sm text-gray-400">Gerando QR Code…</p>
-            </div>
-          ) : (
-            <>
-              {/* QR Code */}
-              <div className="rounded-2xl bg-white p-6 shadow-sm flex flex-col items-center gap-4">
-                <div className="rounded-2xl border-4 border-gray-100 p-3 bg-white">
-                  {qrBase64 ? (
-                    <img
-                      src={`data:image/png;base64,${qrBase64}`}
-                      alt="QR Code PIX"
-                      className="h-48 w-48"
-                    />
-                  ) : (
-                    /* Sem imagem base64 (PagBank/estático) — mostra ícone */
-                    <div className="h-48 w-48 flex flex-col items-center justify-center gap-3 bg-gray-50 rounded-xl">
-                      <span className="text-5xl">⚡</span>
-                      <p className="text-xs text-gray-400 text-center px-4">Use a chave<br/>PIX abaixo</p>
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 text-xs text-gray-400">
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
-                  Aguardando pagamento…
-                </div>
-              </div>
-
-              {/* Chave PIX copia-e-cola */}
-              <div className="rounded-2xl bg-white p-5 shadow-sm space-y-2">
-                <p className="text-xs font-bold uppercase tracking-wider text-gray-400">PIX Copia e Cola</p>
-                <div className="flex items-center gap-2 rounded-xl border-2 border-gray-100 px-4 py-3">
-                  <span className="flex-1 text-sm text-gray-700 truncate font-mono">{pixKey}</span>
-                  <button
-                    onClick={copyKey}
-                    className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold transition"
-                    style={{ background: copied ? '#dcfce7' : `${color}15`, color: copied ? '#16a34a' : color }}
-                  >
-                    {copied ? '✓ Copiado!' : 'Copiar'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Aviso */}
-              <div className="rounded-2xl bg-amber-50 border border-amber-200 p-4 flex gap-3 items-start">
-                <span className="text-xl shrink-0">⏱</span>
-                <div>
-                  <p className="text-sm font-bold text-amber-800">Pague e confirme</p>
-                  <p className="text-xs text-amber-700 mt-0.5">Após realizar o PIX, toque em <strong>"Já realizei o PIX"</strong> para confirmar seu pedido.</p>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      <div className="fixed bottom-0 left-0 right-0 border-t border-gray-100 bg-white p-4 space-y-2">
-        <button
-          onClick={onConfirmed}
-          disabled={state === 'loading'}
-          className="w-full rounded-2xl py-4 text-base font-black text-white transition active:scale-[.98] disabled:opacity-40"
-          style={{ background: color }}
-        >
-          ✅ Já realizei o PIX
-        </button>
-        <button
-          onClick={onBack}
-          className="w-full rounded-2xl py-3 text-sm font-medium text-gray-500 border border-gray-200 hover:bg-gray-50 active:scale-[.98]"
-        >
-          ← Escolher outro método
-        </button>
       </div>
     </div>
   )
@@ -336,11 +139,6 @@ export default function OnlineOrderPage() {
   const [deliveryType, setDeliveryType]   = useState<DeliveryType>('delivery')
   const [address, setAddress]             = useState('')
   const [notes, setNotes]                 = useState('')
-
-  // Pagamento
-  const [paymentMethod, setPaymentMethod]   = useState<OnlinePaymentMethod | ''>('')
-  const [changeFor, setChangeFor]           = useState('')
-  const [pendingOrderId, setPendingOrderId] = useState<string | null>(null)
 
   const color       = restaurant?.primaryColor ?? '#f97316'
   const r           = restaurant as (Restaurant & Record<string, unknown>) | null
@@ -396,32 +194,20 @@ export default function OnlineOrderPage() {
     )
   }
 
-  // Avança de "Seus dados" para seleção de pagamento
-  function handleFinalize() {
+  async function handleFinalize() {
     if (!restaurantId || !customerName.trim()) return
     if (deliveryType === 'delivery' && !address.trim()) return
-    setStep('payment')
-  }
-
-  // Submete o pedido após escolha de pagamento
-  async function handleSubmitOrder() {
-    if (!restaurantId || !paymentMethod) return
     setSending(true)
     try {
-      const pixProvider = (restaurant as unknown as Record<string,unknown>)?.pixProvider as string | undefined
-
-      const orderId = await createOnlineOrder(
+      await createOnlineOrder(
         restaurantId,
         {
           customerName: customerName.trim(),
-          ...(phone.trim() ? { phone: phone.trim() } : {}),
-          ...(notes.trim() ? { notes: notes.trim() } : {}),
+          ...(phone.trim()   ? { phone:   phone.trim()   } : {}),
+          ...(notes.trim()   ? { notes:   notes.trim()   } : {}),
           ...(deliveryType === 'delivery' && address.trim() ? { address: address.trim() } : {}),
           deliveryType,
           total: cartTotal,
-          paymentMethod,
-          ...(paymentMethod === 'cash' && changeFor ? { changeFor: parseFloat(changeFor) } : {}),
-          ...(paymentMethod === 'pix' && pixProvider ? { pixProvider } : {}),
         },
         cart.map((i) => ({
           productId: i.product.id,
@@ -431,13 +217,7 @@ export default function OnlineOrderPage() {
           ...(i.size ? { size: i.size } : {}),
         })),
       )
-
-      if (paymentMethod === 'pix') {
-        setPendingOrderId(orderId)
-        setStep('pix_qr')
-      } else {
-        setStep('success')
-      }
+      setStep('success')
     } catch (err) {
       console.error('[OnlineOrder] Erro ao finalizar pedido:', err)
       const msg = err instanceof Error ? err.message : String(err)
@@ -445,190 +225,6 @@ export default function OnlineOrderPage() {
     } finally {
       setSending(false)
     }
-  }
-
-  // ─── PIX QR ─────────────────────────────────────────────────────────────────
-  if (step === 'pix_qr' && pendingOrderId) {
-    return (
-      <PixQRView
-        orderId={pendingOrderId}
-        restaurantId={restaurantId ?? ''}
-        total={cartTotal}
-        color={color}
-        onConfirmed={() => setStep('success')}
-        onBack={() => setStep('payment')}
-      />
-    )
-  }
-
-  // ─── Pagamento ───────────────────────────────────────────────────────────────
-  if (step === 'payment') {
-    const canProceed = !!paymentMethod &&
-      (paymentMethod !== 'cash' || !changeFor || parseFloat(changeFor) >= cartTotal)
-
-    const rr = restaurant as unknown as Record<string, unknown>
-    const acceptCash = rr?.acceptCash !== false
-    const acceptCard = rr?.acceptCard !== false
-
-    const allMethods: { id: OnlinePaymentMethod; icon: string; label: string; sub: string; always?: boolean }[] = [
-      { id: 'pix',  icon: '⚡', label: 'PIX',     sub: 'QR Code — pagamento instantâneo', always: true },
-      { id: 'card', icon: '💳', label: 'Cartão',  sub: 'Motoboy leva a maquininha' },
-      { id: 'cash', icon: '💵', label: 'Dinheiro', sub: 'Pague na entrega ou retirada' },
-    ]
-    const methods = allMethods.filter(m =>
-      m.always || (m.id === 'card' && acceptCard) || (m.id === 'cash' && acceptCash)
-    )
-
-    return (
-      <div className="flex min-h-screen flex-col bg-gray-50">
-        {/* Header */}
-        <div className="sticky top-0 z-10 bg-white px-4 py-4 shadow-sm flex items-center gap-3">
-          <button onClick={() => setStep('info')} className="flex h-9 w-9 items-center justify-center rounded-xl bg-gray-100 text-gray-600 text-lg">←</button>
-          <div>
-            <p className="font-bold text-gray-900">Forma de pagamento</p>
-            <p className="text-xs text-gray-500">Como você vai pagar?</p>
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4 pb-36">
-          <div className="mx-auto max-w-md space-y-3">
-
-            {/* Total */}
-            <div className="rounded-2xl bg-white p-4 shadow-sm flex justify-between items-center">
-              <span className="text-sm font-medium text-gray-500">Total do pedido</span>
-              <span className="text-lg font-black" style={{ color }}>R$ {cartTotal.toFixed(2)}</span>
-            </div>
-
-            {/* Opções de pagamento */}
-            <div className="space-y-2">
-              {methods.map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => { setPaymentMethod(m.id); if (m.id !== 'cash') setChangeFor('') }}
-                  className={`w-full flex items-center gap-4 rounded-2xl border-2 px-4 py-4 text-left transition active:scale-[.98] ${
-                    paymentMethod === m.id ? '' : 'border-gray-100 bg-white hover:border-gray-200'
-                  }`}
-                  style={paymentMethod === m.id
-                    ? { borderColor: color, background: `${color}10` }
-                    : {}}
-                >
-                  <div
-                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-2xl"
-                    style={{ background: paymentMethod === m.id ? `${color}20` : '#f3f4f6' }}
-                  >
-                    {m.icon}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-gray-900 text-base">{m.label}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{m.sub}</p>
-                  </div>
-                  <div
-                    className="h-5 w-5 shrink-0 rounded-full border-2 flex items-center justify-center"
-                    style={paymentMethod === m.id
-                      ? { borderColor: color }
-                      : { borderColor: '#d1d5db' }}
-                  >
-                    {paymentMethod === m.id && (
-                      <div className="h-2.5 w-2.5 rounded-full" style={{ background: color }} />
-                    )}
-                  </div>
-                </button>
-              ))}
-            </div>
-
-            {/* Troco — só para dinheiro */}
-            {paymentMethod === 'cash' && (
-              <div className="rounded-2xl bg-white p-5 shadow-sm space-y-3">
-                <p className="text-sm font-bold text-gray-700">Precisa de troco?</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {(['exato', 10, 20, 50] as const).map((v) => {
-                    const isExato = v === 'exato'
-                    const val = isExato ? '' : String(Math.ceil(cartTotal / 10) * 10 + (v as number))
-                    const label = isExato ? '💰 Dinheiro exato' : `Troco p/ R$ ${val}`
-                    return (
-                      <button
-                        key={String(v)}
-                        onClick={() => setChangeFor(val)}
-                        className="rounded-xl border-2 py-3 text-sm font-semibold transition"
-                        style={changeFor === val
-                          ? { borderColor: color, color, background: `${color}10` }
-                          : { borderColor: '#e5e7eb', color: '#6b7280' }}
-                      >
-                        {label}
-                      </button>
-                    )
-                  })}
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-400">Ou digite o valor</label>
-                  <div className="flex items-center gap-2 rounded-xl border-2 border-gray-100 px-4 py-3 focus-within:border-gray-300">
-                    <span className="text-gray-400 text-sm font-medium">R$</span>
-                    <input
-                      type="number"
-                      min={cartTotal}
-                      step="1"
-                      value={changeFor}
-                      onChange={(e) => setChangeFor(e.target.value)}
-                      placeholder={cartTotal.toFixed(2)}
-                      className="flex-1 text-sm text-gray-800 outline-none bg-transparent"
-                    />
-                  </div>
-                  {changeFor && parseFloat(changeFor) < cartTotal && (
-                    <p className="mt-1.5 text-xs text-red-500">⚠️ Valor menor que o total do pedido</p>
-                  )}
-                  {changeFor && parseFloat(changeFor) >= cartTotal && (
-                    <p className="mt-1.5 text-xs text-green-600">
-                      ✅ Troco: R$ {(parseFloat(changeFor) - cartTotal).toFixed(2)}
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Resumo */}
-            <div className="rounded-2xl bg-white p-5 shadow-sm">
-              <p className="mb-3 text-xs font-bold uppercase tracking-wide text-gray-400">Resumo do pedido</p>
-              {cart.map((item, i) => (
-                <div key={i} className="flex justify-between py-1 text-sm text-gray-700">
-                  <span>{item.qty}× {item.product.name}{item.size ? ` (${item.size})` : ''}</span>
-                  <span>R$ {(item.unitPrice * item.qty).toFixed(2)}</span>
-                </div>
-              ))}
-              <div className="mt-3 flex justify-between border-t border-gray-100 pt-3 text-base font-black text-gray-900">
-                <span>Total</span>
-                <span style={{ color }}>R$ {cartTotal.toFixed(2)}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Botão fixo */}
-        <div className="fixed bottom-0 left-0 right-0 border-t border-gray-100 bg-white p-4">
-          <button
-            onClick={handleSubmitOrder}
-            disabled={sending || !canProceed}
-            className="w-full rounded-2xl py-4 text-base font-black text-white transition active:scale-[.98] disabled:opacity-50"
-            style={{ background: color }}
-          >
-            {sending ? (
-              <span className="flex items-center justify-center gap-2">
-                <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25"/>
-                  <path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="4" strokeLinecap="round" className="opacity-75"/>
-                </svg>
-                Enviando…
-              </span>
-            ) : paymentMethod === 'pix'
-              ? '⚡ Gerar QR Code PIX'
-              : paymentMethod === 'cash'
-              ? '💵 Confirmar Pedido'
-              : paymentMethod === 'card'
-              ? '💳 Confirmar Pedido'
-              : 'Selecione uma forma de pagamento'}
-          </button>
-        </div>
-      </div>
-    )
   }
 
   // ─── Loading ────────────────────────────────────────────────────────────────
@@ -669,7 +265,7 @@ export default function OnlineOrderPage() {
         )}
       </div>
       <button
-        onClick={() => { setCart([]); setCustomerName(''); setPhone(''); setAddress(''); setNotes(''); setPaymentMethod(''); setChangeFor(''); setPendingOrderId(null); setStep('menu') }}
+        onClick={() => { setCart([]); setCustomerName(''); setPhone(''); setAddress(''); setNotes(''); setStep('menu') }}
         className="rounded-2xl px-8 py-3 text-sm font-bold text-white"
         style={{ background: color }}
       >
@@ -872,6 +468,16 @@ export default function OnlineOrderPage() {
           {bannerImage && (
             <img src={bannerImage} alt="" className="w-full h-32 object-cover opacity-50" />
           )}
+          {/* Botão voltar ao topo esquerdo */}
+          <button
+            onClick={() => window.history.back()}
+            className="absolute top-3 left-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-black/30 text-white backdrop-blur-sm hover:bg-black/50 transition active:scale-90"
+            title="Voltar"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+              <path fillRule="evenodd" d="M7.72 12.53a.75.75 0 0 1 0-1.06l7.5-7.5a.75.75 0 1 1 1.06 1.06L9.31 12l6.97 6.97a.75.75 0 1 1-1.06 1.06l-7.5-7.5Z" clipRule="evenodd" />
+            </svg>
+          </button>
           <div className={`${bannerImage ? 'absolute inset-0' : 'pt-1'} flex items-end gap-3 px-4 pb-4 pt-4`}>
             {restaurant?.logo ? (
               <img src={restaurant.logo} alt="" className="h-12 w-12 rounded-2xl object-cover border-2 border-white/80 shadow shrink-0" />

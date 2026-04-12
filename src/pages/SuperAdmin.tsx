@@ -355,6 +355,20 @@ function RestaurantCard({
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+          {/* Toggle loja online */}
+          <button
+            onClick={() => updateRestaurantById(restaurant.id, {
+              onlineOrderEnabled: !restaurant.onlineOrderEnabled
+            })}
+            className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+              restaurant.onlineOrderEnabled
+                ? 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100'
+                : 'border-gray-200 text-gray-400 hover:bg-gray-50'
+            }`}
+            title={restaurant.onlineOrderEnabled ? 'Desabilitar loja na central' : 'Habilitar loja na central'}
+          >
+            🛍️ {restaurant.onlineOrderEnabled ? 'Loja ativa' : 'Loja off'}
+          </button>
           <button
             onClick={() => {
               navigator.clipboard.writeText(`${window.location.origin}/pedido/${restaurant.id}`)
@@ -527,12 +541,22 @@ export default function SuperAdminPage() {
             <p className="text-xs text-gray-400">Controle total da plataforma · FoodStore</p>
           </div>
         </div>
-        <button
-          onClick={async () => { await signOut(); navigate('/login') }}
-          className="rounded-xl border border-gray-200 px-4 py-2 text-xs text-gray-500 hover:bg-gray-50"
-        >
-          Sair
-        </button>
+        <div className="flex items-center gap-2">
+          <a
+            href="/loja"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-bold text-green-700 hover:bg-green-100 transition hidden sm:flex items-center gap-1.5"
+          >
+            🛍️ Central de lojas
+          </a>
+          <button
+            onClick={async () => { await signOut(); navigate('/login') }}
+            className="rounded-xl border border-gray-200 px-4 py-2 text-xs text-gray-500 hover:bg-gray-50"
+          >
+            Sair
+          </button>
+        </div>
       </header>
 
       <main className="flex-1 overflow-y-auto">
@@ -545,8 +569,8 @@ export default function SuperAdminPage() {
               <p className="text-xs text-gray-400 mt-0.5">Restaurantes</p>
             </div>
             <div className="rounded-2xl border border-green-100 bg-green-50 p-4 shadow-sm">
-              <p className="text-2xl font-black text-green-600">Ativo</p>
-              <p className="text-xs text-green-500 mt-0.5">Status da plataforma</p>
+              <p className="text-2xl font-black text-green-600">{restaurants.filter(r => r.onlineOrderEnabled).length}</p>
+              <p className="text-xs text-green-500 mt-0.5">Lojas ativas na central</p>
             </div>
             <div className="col-span-2 sm:col-span-1 rounded-2xl border border-yellow-200 bg-yellow-50 p-4 shadow-sm">
               <p className="text-2xl font-black text-yellow-700">Full</p>

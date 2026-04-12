@@ -27,7 +27,6 @@ const NAV: NavItem[] = [
   { label: 'Configurações',      path: '/settings',         icon: '⚙️', module: 'settings',   roles: ['admin'] },
   { label: 'Impressão Auto',     path: '/print-agent',      icon: '🖨️', module: 'kitchen',    roles: ['admin', 'kitchen', 'cashier'] },
   { label: 'Mesas',              path: '/tables',   icon: '🍽️', module: 'tables',  roles: ['admin', 'waiter', 'cashier'], section: 'extra' },
-  { label: 'Caixa / PDV',        path: '/cashier',  icon: '💳', module: 'cashier', roles: ['admin', 'cashier'],           section: 'extra' },
 ]
 
 export function Layout({ children }: { children: React.ReactNode }) {

@@ -3,7 +3,7 @@ export type Role = 'superadmin' | 'admin' | 'cashier' | 'waiter' | 'kitchen' | '
 
 // ─── Modules (visibilidade por usuário) ───────────────────────────────────────
 export type AppModule =
-  | 'central' | 'dashboard' | 'tables' | 'orders' | 'kitchen' | 'cashier'
+  | 'central' | 'dashboard' | 'tables' | 'orders' | 'kitchen'
   | 'marmitaria' | 'delivery' | 'menu' | 'users' | 'qrcodes'
   | 'settings' | 'online-orders'
 
@@ -79,6 +79,10 @@ export interface Product {
   active:       boolean
   sizes?:       ProductSize[]    // opcional — se preenchido, cliente escolhe tamanho
   stock?:       number | null    // null = ilimitado
+  // Promoção
+  onPromotion?:     boolean      // true = exibir badge e preço promocional
+  promotionPrice?:  number       // preço com desconto
+  promotionLabel?:  string       // ex: "30% OFF", "Leve 2 Pague 1"
 }
 
 // ─── Tables ───────────────────────────────────────────────────────────────────

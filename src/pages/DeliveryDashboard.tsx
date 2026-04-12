@@ -379,7 +379,7 @@ export default function DeliveryDashboardPage() {
         )}
 
         {/* ── Pedidos prontos aguardando atribuição ── */}
-        {(isAdmin ? (pending.length > 0 || pendingOnline.length > 0) : false) && (
+        {pending.length > 0 && (
           <div className="p-6 pb-0">
             <p className="mb-3 text-sm font-semibold text-gray-700">
               🟢 Prontos para entrega
@@ -534,29 +534,71 @@ export default function DeliveryDashboardPage() {
                   )
                 })}
 
-                {/* Resumo total histórico (admin) */}
+                {/* ── Resumo financeiro por entregador (admin) ── */}
                 {isAdmin && historyRuns.length > 0 && (
-                  <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-                    <p className="mb-3 text-sm font-semibold text-gray-700">Resumo por entregador</p>
+                  <div className="rounded-2xl border border-gray-200 bg-white p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-bold text-gray-800">💰 Quanto pagar por entregador</p>
+                      {deliveryFee > 0 && (
+                        <span className="text-xs text-gray-400">Taxa: {fmt(deliveryFee)}/corrida</span>
+                      )}
+                    </div>
                     {deliverers.map((d) => {
-                      const dRuns  = historyRuns.filter((r) => r.deliveryUserId === d.uid)
-                      const dTotal = dRuns.reduce((s, r) => s + r.total, 0)
-                      if (dRuns.length === 0) return null
+                      const allDRuns   = historyRuns.filter((r) => r.deliveryUserId === d.uid)
+                      const todayDRuns = allDRuns.filter((r) => {
+                        const dt = new Date(r.deliveredAt ?? r.createdAt)
+                        return dt.toDateString() === new Date().toDateString()
+                      })
+                      const faturadoAll   = allDRuns.reduce((s, r) => s + r.total, 0)
+                      const aPagarAll     = allDRuns.length * deliveryFee
+                      const aPagarHoje    = todayDRuns.length * deliveryFee
+                      if (allDRuns.length === 0) return null
                       return (
-                        <div key={d.uid} className="flex items-center justify-between py-2 border-b border-gray-200 last:border-0">
-                          <div className="flex items-center gap-2">
-                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-purple-100 text-xs font-bold text-purple-700">
-                              {d.name.charAt(0)}
+                        <div key={d.uid} className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                          {/* Nome + avatar */}
+                          <div className="flex items-center gap-2 mb-3">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-purple-600 text-sm font-black text-white">
+                              {d.name.charAt(0).toUpperCase()}
                             </div>
-                            <span className="text-sm text-gray-700">{d.name}</span>
+                            <div>
+                              <p className="text-sm font-bold text-gray-800">{d.name}</p>
+                              <p className="text-xs text-gray-400">{allDRuns.length} entrega{allDRuns.length !== 1 ? 's' : ''} no total · {todayDRuns.length} hoje</p>
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <p className="text-sm font-bold text-gray-700">{fmt(dTotal)}</p>
-                            <p className="text-xs text-gray-400">{dRuns.length} entrega{dRuns.length !== 1 ? 's' : ''}</p>
+                          {/* Métricas */}
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="rounded-lg bg-white p-2 text-center border border-gray-100">
+                              <p className="text-xs text-gray-400">Corridas</p>
+                              <p className="text-base font-black text-gray-800">{allDRuns.length}</p>
+                            </div>
+                            <div className="rounded-lg bg-white p-2 text-center border border-gray-100">
+                              <p className="text-xs text-gray-400">Faturado</p>
+                              <p className="text-sm font-bold text-gray-700">{fmt(faturadoAll)}</p>
+                            </div>
+                            <div className={`rounded-lg p-2 text-center border ${aPagarAll > 0 ? 'bg-green-50 border-green-200' : 'bg-white border-gray-100'}`}>
+                              <p className="text-xs text-gray-400">A pagar</p>
+                              <p className={`text-sm font-black ${aPagarAll > 0 ? 'text-green-700' : 'text-gray-400'}`}>
+                                {aPagarAll > 0 ? fmt(aPagarAll) : '—'}
+                              </p>
+                            </div>
                           </div>
+                          {/* Destaque hoje */}
+                          {todayDRuns.length > 0 && deliveryFee > 0 && (
+                            <div className="mt-2 flex items-center justify-between rounded-lg bg-amber-50 border border-amber-100 px-3 py-1.5">
+                              <span className="text-xs text-amber-700">A pagar hoje ({todayDRuns.length} corrida{todayDRuns.length !== 1 ? 's' : ''})</span>
+                              <span className="text-sm font-black text-amber-800">{fmt(aPagarHoje)}</span>
+                            </div>
+                          )}
                         </div>
                       )
                     })}
+                    {/* Total geral a pagar */}
+                    {deliveryFee > 0 && (
+                      <div className="flex items-center justify-between border-t border-gray-200 pt-3">
+                        <span className="text-sm font-semibold text-gray-600">Total a pagar (todos)</span>
+                        <span className="text-base font-black text-red-600">{fmt(historyRuns.length * deliveryFee)}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

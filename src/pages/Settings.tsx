@@ -370,6 +370,9 @@ export default function SettingsPage() {
   const [email, setEmail]             = useState('')
   const [address, setAddress]         = useState('')
   const [city, setCity]               = useState('')
+  const [lat, setLat]                 = useState('')
+  const [lon, setLon]                 = useState('')
+  const [geoCapturing, setGeoCapturing] = useState(false)
   const [instagram, setInstagram]     = useState('')
   const [facebook, setFacebook]       = useState('')
   const [description, setDescription] = useState('')
@@ -407,6 +410,8 @@ export default function SettingsPage() {
         setEmail(r.email ?? '')
         setAddress(r.address ?? '')
         setCity(r.city ?? '')
+        setLat((r as any).lat != null ? String((r as any).lat) : '')
+        setLon((r as any).lon != null ? String((r as any).lon) : '')
         setInstagram(r.instagram ?? '')
         setFacebook(r.facebook ?? '')
         setDescription(r.description ?? '')
@@ -444,6 +449,8 @@ export default function SettingsPage() {
         minOrderValue: minOrderValue ? parseFloat(minOrderValue) : null,
         estimatedTime, openingHours,
         serviceRate: serviceRate / 100,
+        ...(lat ? { lat: parseFloat(lat) } : {}),
+        ...(lon ? { lon: parseFloat(lon) } : {}),
       }
       // Remove strings vazias e nulls desnecessários
       Object.keys(updates).forEach(k => {
@@ -552,6 +559,56 @@ export default function SettingsPage() {
                     <Field label="Cidade / Estado">
                       <TextInput value={city} onChange={setCity} placeholder="Ex: São Paulo – SP" />
                     </Field>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Coordenadas GPS
+                        <span className="ml-1 normal-case font-normal text-gray-400">(para aparecer na central de lojas por proximidade)</span>
+                      </label>
+                      <div className="flex gap-2 items-start">
+                        <div className="flex-1 space-y-2">
+                          <TextInput
+                            value={lat}
+                            onChange={setLat}
+                            placeholder="Latitude  ex: -23.5505"
+                          />
+                          <TextInput
+                            value={lon}
+                            onChange={setLon}
+                            placeholder="Longitude  ex: -46.6333"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          disabled={geoCapturing}
+                          onClick={() => {
+                            if (!navigator.geolocation) return
+                            setGeoCapturing(true)
+                            navigator.geolocation.getCurrentPosition(
+                              (pos) => {
+                                setLat(pos.coords.latitude.toFixed(6))
+                                setLon(pos.coords.longitude.toFixed(6))
+                                setGeoCapturing(false)
+                              },
+                              () => setGeoCapturing(false),
+                              { timeout: 8000 },
+                            )
+                          }}
+                          className="shrink-0 mt-0.5 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 disabled:opacity-50 transition"
+                        >
+                          {geoCapturing ? '…' : '📡 Capturar\naqui'}
+                        </button>
+                      </div>
+                      {lat && lon && (
+                        <a
+                          href={`https://www.google.com/maps?q=${lat},${lon}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-1.5 inline-block text-xs text-brand-600 hover:underline"
+                        >
+                          ✓ Ver no mapa →
+                        </a>
+                      )}
+                    </div>
                   </div>
                 </section>
 

@@ -18,6 +18,9 @@ const EMPTY: Omit<Product, 'id'> = {
   active:       true,
   sizes:        [],
   stock:        null,
+  onPromotion:    false,
+  promotionPrice: 0,
+  promotionLabel: '',
 }
 
 const DEFAULT_SIZES: ProductSize[] = [
@@ -46,6 +49,7 @@ function ProductModal({
   const [error, setError]     = useState('')
   const [useSizes, setUseSizes] = useState((product?.sizes?.length ?? 0) > 0)
   const [useStock, setUseStock] = useState(product?.stock !== null && product?.stock !== undefined)
+  const [usePromo, setUsePromo] = useState(product?.onPromotion ?? false)
 
   function set<K extends keyof typeof form>(k: K, v: typeof form[K]) {
     setForm((p) => ({ ...p, [k]: v }))
@@ -76,6 +80,12 @@ function ProductModal({
     set('stock', on ? 10 : null)
   }
 
+  function togglePromo(on: boolean) {
+    setUsePromo(on)
+    set('onPromotion', on)
+    if (!on) { set('promotionPrice', 0); set('promotionLabel', '') }
+  }
+
   async function handleSave() {
     if (!form.name.trim()) { setError('Nome é obrigatório'); return }
     if (!useSizes && form.price <= 0) { setError('Preço deve ser maior que zero'); return }
@@ -85,6 +95,9 @@ function ProductModal({
         ...form,
         sizes: useSizes ? (form.sizes ?? []) : [],
         stock: useStock ? (form.stock ?? 0) : null,
+        onPromotion:    usePromo,
+        promotionPrice: usePromo ? (form.promotionPrice ?? 0) : 0,
+        promotionLabel: usePromo ? (form.promotionLabel ?? '') : '',
       }
       if (isNew) await createProduct(payload)
       else       await updateProduct(product!.id!, payload)
@@ -206,6 +219,55 @@ function ProductModal({
                   onChange={(e) => set('stock', parseInt(e.target.value) || 0)}
                 />
                 <p className="mt-1 text-xs text-gray-400">Aviso automático quando ≤ 5 unidades</p>
+              </div>
+            )}
+          </div>
+
+          {/* Promoção */}
+          <div className="rounded-xl border border-orange-100 bg-orange-50/50 p-3">
+            <label className="flex items-center gap-3 cursor-pointer mb-3">
+              <div
+                onClick={() => togglePromo(!usePromo)}
+                className={`relative h-5 w-9 rounded-full transition ${usePromo ? 'bg-orange-500' : 'bg-gray-200'}`}
+              >
+                <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${usePromo ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              </div>
+              <span className="text-sm font-medium text-gray-700">🏷️ Colocar em promoção</span>
+            </label>
+
+            {usePromo && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Preço promocional (R$)</label>
+                    <input
+                      className="input"
+                      type="number" min="0" step="0.01"
+                      value={form.promotionPrice || ''}
+                      onChange={(e) => set('promotionPrice', parseFloat(e.target.value) || 0)}
+                      placeholder="0,00"
+                    />
+                    {form.promotionPrice > 0 && form.price > 0 && (
+                      <p className="text-xs text-orange-600 mt-1 font-semibold">
+                        Desconto: {Math.round(((form.price - form.promotionPrice) / form.price) * 100)}%
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Etiqueta do badge</label>
+                    <input
+                      className="input"
+                      value={form.promotionLabel ?? ''}
+                      onChange={(e) => set('promotionLabel', e.target.value)}
+                      placeholder="Ex: 30% OFF"
+                      maxLength={20}
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-orange-700 bg-orange-100 rounded-lg px-3 py-2">
+                  <span>👁️</span>
+                  <span>Badge "{form.promotionLabel || '% OFF'}" aparece no card do produto na loja do cliente</span>
+                </div>
               </div>
             )}
           </div>
@@ -336,6 +398,7 @@ export default function MenuAdminPage() {
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Produto</th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Categoria</th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Preço</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Promoção</th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Estoque</th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">Status</th>
                   <th className="px-4 py-3" />
@@ -371,6 +434,18 @@ export default function MenuAdminPage() {
                         ? <span className="text-xs text-gray-500">{p.sizes!.map(s => `${s.label} R$${s.price.toFixed(2)}`).join(' · ')}</span>
                         : `R$ ${p.price.toFixed(2)}`
                       }
+                    </td>
+                    <td className="px-4 py-3">
+                      {p.onPromotion && p.promotionPrice ? (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-bold text-orange-700">
+                            {p.promotionLabel || '% OFF'}
+                          </span>
+                          <span className="text-xs text-orange-600 font-semibold">R$ {p.promotionPrice.toFixed(2)}</span>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-300">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <StockBadge stock={p.stock} />

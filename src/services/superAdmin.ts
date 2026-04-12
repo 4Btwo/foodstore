@@ -124,14 +124,14 @@ export async function deleteUserById(uid: string): Promise<void> {
 
 export const DEFAULT_MODULES: Record<Role, AppModule[]> = {
   superadmin: [
-    'central', 'dashboard', 'tables', 'orders', 'kitchen', 'cashier',
+    'central', 'dashboard', 'tables', 'orders', 'kitchen',
     'marmitaria', 'delivery', 'menu', 'users', 'qrcodes', 'settings', 'online-orders',
   ],
   admin: [
-    'central', 'dashboard', 'tables', 'orders', 'kitchen', 'cashier',
+    'central', 'dashboard', 'tables', 'orders', 'kitchen',
     'marmitaria', 'delivery', 'menu', 'users', 'qrcodes', 'settings', 'online-orders',
   ],
-  cashier:  ['central', 'cashier', 'marmitaria', 'tables', 'orders'],
+  cashier:  ['central', 'marmitaria', 'tables', 'orders'],
   waiter:   ['central', 'tables', 'orders', 'marmitaria'],
   kitchen:  ['kitchen'],
   delivery: ['delivery'],
@@ -143,7 +143,6 @@ export const ALL_MODULES: { key: AppModule; label: string; icon: string }[] = [
   { key: 'tables',        label: 'Mesas',             icon: '🍽️' },
   { key: 'orders',        label: 'Pedidos',           icon: '🧾' },
   { key: 'kitchen',       label: 'Cozinha',           icon: '👨‍🍳' },
-  { key: 'cashier',       label: 'Caixa / PDV',       icon: '💳' },
   { key: 'marmitaria',    label: 'Marmitaria',        icon: '🍱' },
   { key: 'delivery',      label: 'Entregas',          icon: '🛵' },
   { key: 'online-orders', label: 'Pedidos Online',    icon: '🌐' },
