@@ -9,6 +9,7 @@ import {
   where,
   orderBy,
   Timestamp,
+  increment,
   type Unsubscribe,
 } from 'firebase/firestore'
 import { db } from './firebase'
@@ -116,6 +117,17 @@ export async function createOrder(
         price:     item.price,
       }),
     ),
+  )
+
+  // Decrementa estoque dos produtos que têm controle de stock
+  await Promise.all(
+    items
+      .filter((i) => i.productId)
+      .map((i) =>
+        updateDoc(doc(db, 'products', i.productId), {
+          stock: increment(-i.qty),
+        }).catch(() => { /* produto sem stock controlado — ignora */ })
+      )
   )
 
   await setTableStatusByNumber(restaurantId, tableNumber, 'open')

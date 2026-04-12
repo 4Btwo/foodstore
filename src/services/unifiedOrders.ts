@@ -309,8 +309,10 @@ export async function advanceOrder(
         deliveryUserId: extra.deliveryUserId,
         deliveryName:   extra.deliveryName ?? '',
         orderId:        order.originId,
+        orderOrigin:    order.origin,                // 'marmita' | 'balcao'
         customerName:   order.customerName ?? '',
         address:        order.address ?? '',
+        phone:          order.phone ?? '',
         total:          order.total,
         status:         'assigned',
         createdAt:      Timestamp.now(),
@@ -323,6 +325,22 @@ export async function advanceOrder(
       status: next,
       ...(extra ?? {}),
     })
+    // Cria delivery_run para pedidos online que saem para entrega
+    if (next === 'out_for_delivery' && extra?.deliveryUserId) {
+      await addDoc(collection(db, 'delivery_runs'), {
+        restaurantId:   order.restaurantId,
+        deliveryUserId: extra.deliveryUserId,
+        deliveryName:   extra.deliveryName ?? '',
+        orderId:        order.originId,
+        orderOrigin:    'online',                    // novo campo para saber a collection
+        customerName:   order.customerName ?? '',
+        address:        order.address ?? '',
+        phone:          order.phone ?? '',
+        total:          order.total,
+        status:         'assigned',
+        createdAt:      Timestamp.now(),
+      })
+    }
   }
 }
 
@@ -371,4 +389,190 @@ export async function createBalcaoOrder(
       .map((i) => updateDoc(doc(db, 'products', i.product.id), { stock: increment(-i.qty) })),
   )
   return orderRef.id
+}
+
+
+// ─── Histórico de pedidos concluídos ─────────────────────────────────────────
+
+function subscribeMesaHistory(
+  restaurantId: string,
+  cb: (orders: UnifiedOrder[]) => void,
+  limit = 30,
+): Unsubscribe {
+  const q = query(
+    collection(db, 'orders'),
+    where('restaurantId', '==', restaurantId),
+    where('status', 'in', ['closed', 'cancelled']),
+    orderBy('createdAt', 'desc'),
+  )
+  const itemsCache: Record<string, UnifiedOrderItem[]> = {}
+  const unsubs: Unsubscribe[] = []
+  let orders: Order[] = []
+
+  function emit() {
+    cb(orders.slice(0, limit).map((o) => ({
+      id: `mesa__${o.id}`, origin: 'mesa', originId: o.id,
+      restaurantId: o.restaurantId, tableNumber: o.tableNumber,
+      status: toUnifiedStatus('mesa', o.status),
+      total: o.total, items: itemsCache[o.id] ?? [], createdAt: o.createdAt,
+    })))
+  }
+
+  const unsub = onSnapshot(q, (snap) => {
+    orders = snap.docs.map((d) => ({
+      id: d.id, ...d.data(),
+      createdAt: (d.data().createdAt as Timestamp).toDate(),
+    }) as Order)
+    orders.forEach((o) => {
+      if (itemsCache[o.id]) return
+      itemsCache[o.id] = []
+      const iq = query(collection(db, 'order_items'), where('orderId', '==', o.id))
+      const iu = onSnapshot(iq, (s) => {
+        itemsCache[o.id] = s.docs.map((d) => {
+          const x = d.data() as OrderItem
+          return { name: x.name, qty: x.qty, price: x.price, ...(x.size ? { size: x.size } : {}) }
+        })
+        emit()
+      })
+      unsubs.push(iu)
+    })
+    emit()
+  })
+  return () => { unsub(); unsubs.forEach((u) => u()) }
+}
+
+function subscribeMarmitaHistory(
+  restaurantId: string,
+  cb: (orders: UnifiedOrder[]) => void,
+  limit = 30,
+): Unsubscribe {
+  const q = query(
+    collection(db, 'marmita_orders'),
+    where('restaurantId', '==', restaurantId),
+    where('status', 'in', ['delivered', 'cancelled']),
+    orderBy('createdAt', 'desc'),
+  )
+  const itemsCache: Record<string, UnifiedOrderItem[]> = {}
+  const unsubs: Unsubscribe[] = []
+  let orders: MarmitaOrder[] = []
+
+  function emit() {
+    cb(orders.slice(0, limit).map((o) => ({
+      id: `marmita__${o.id}`, origin: o.deliveryType === 'pickup' && !o.address ? 'balcao' : 'marmita',
+      originId: o.id, restaurantId: o.restaurantId,
+      customerName: o.customerName, phone: o.phone, address: o.address,
+      notes: o.notes, deliveryType: o.deliveryType,
+      status: toUnifiedStatus('marmita', o.status),
+      total: o.total, items: itemsCache[o.id] ?? [], createdAt: o.createdAt,
+    })))
+  }
+
+  const unsub = onSnapshot(q, (snap) => {
+    orders = snap.docs.map((d) => ({
+      id: d.id, ...d.data(),
+      createdAt: (d.data().createdAt as Timestamp).toDate(),
+    }) as MarmitaOrder)
+    orders.forEach((o) => {
+      if (itemsCache[o.id]) return
+      itemsCache[o.id] = []
+      const iq = query(collection(db, 'marmita_order_items'), where('marmitaOrderId', '==', o.id))
+      const iu = onSnapshot(iq, (s) => {
+        itemsCache[o.id] = s.docs.map((d) => {
+          const x = d.data() as MarmitaOrderItem
+          return { name: x.name, qty: x.qty, price: x.price, ...(x.size ? { size: x.size } : {}) }
+        })
+        emit()
+      })
+      unsubs.push(iu)
+    })
+    emit()
+  })
+  return () => { unsub(); unsubs.forEach((u) => u()) }
+}
+
+function subscribeOnlineHistory(
+  restaurantId: string,
+  cb: (orders: UnifiedOrder[]) => void,
+  limit = 30,
+): Unsubscribe {
+  const q = query(
+    collection(db, 'online_orders'),
+    where('restaurantId', '==', restaurantId),
+    where('status', 'in', ['delivered', 'cancelled']),
+    orderBy('createdAt', 'desc'),
+  )
+  const itemsCache: Record<string, UnifiedOrderItem[]> = {}
+  const unsubs: Unsubscribe[] = []
+  let orders: OnlineOrder[] = []
+
+  function emit() {
+    cb(orders.slice(0, limit).map((o) => ({
+      id: `online__${o.id}`, origin: 'online', originId: o.id,
+      restaurantId: o.restaurantId, customerName: o.customerName,
+      phone: o.phone, address: o.address, notes: o.notes, deliveryType: o.deliveryType,
+      status: toUnifiedStatus('online', o.status),
+      total: o.total, items: itemsCache[o.id] ?? [], createdAt: o.createdAt,
+    })))
+  }
+
+  const unsub = onSnapshot(q, (snap) => {
+    orders = snap.docs.map((d) => ({
+      id: d.id, ...d.data(),
+      createdAt: (d.data().createdAt as Timestamp).toDate(),
+    }) as OnlineOrder)
+    orders.forEach((o) => {
+      if (itemsCache[o.id]) return
+      itemsCache[o.id] = []
+      const iq = query(collection(db, 'online_order_items'), where('onlineOrderId', '==', o.id))
+      const iu = onSnapshot(iq, (s) => {
+        itemsCache[o.id] = s.docs.map((d) => {
+          const x = d.data() as OnlineOrderItem
+          return { name: x.name, qty: x.qty, price: x.price, ...(x.size ? { size: x.size } : {}) }
+        })
+        emit()
+      })
+      unsubs.push(iu)
+    })
+    emit()
+  })
+  return () => { unsub(); unsubs.forEach((u) => u()) }
+}
+
+/** Histórico unificado — pedidos concluídos/cancelados das 3 origens */
+export function subscribeOrderHistory(
+  restaurantId: string,
+  cb: (orders: UnifiedOrder[]) => void,
+  limit = 50,
+): Unsubscribe {
+  let mesa:    UnifiedOrder[] = []
+  let marmita: UnifiedOrder[] = []
+  let online:  UnifiedOrder[] = []
+
+  function merge() {
+    const all = [...mesa, ...marmita, ...online]
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, limit)
+    cb(all)
+  }
+
+  const u1 = subscribeMesaHistory(restaurantId,    (o) => { mesa = o;    merge() }, limit)
+  const u2 = subscribeMarmitaHistory(restaurantId, (o) => { marmita = o; merge() }, limit)
+  const u3 = subscribeOnlineHistory(restaurantId,  (o) => { online = o;  merge() }, limit)
+  return () => { u1(); u2(); u3() }
+}
+
+// ─── Excluir pedido do histórico ──────────────────────────────────────────────
+
+export async function deleteOrderFromHistory(order: UnifiedOrder): Promise<void> {
+  const { deleteDoc, doc: d } = await import('firebase/firestore')
+  const { db: fdb } = await import('./firebase')
+
+  if (order.origin === 'mesa') {
+    await deleteDoc(d(fdb, 'orders', order.originId))
+  } else if (order.origin === 'online') {
+    await deleteDoc(d(fdb, 'online_orders', order.originId))
+  } else {
+    // balcao / marmita
+    await deleteDoc(d(fdb, 'marmita_orders', order.originId))
+  }
 }

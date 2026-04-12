@@ -105,6 +105,17 @@ function ProductCard({
                 <span className="w-5 text-center text-sm font-bold">{cartQty}</span>
                 <button onClick={onAdd} className="flex h-9 w-9 items-center justify-center rounded-full text-lg font-bold text-white" style={{ background: color }}>+</button>
               </div>
+            ) : hasSizes && cartQty > 0 ? (
+              <div className="flex items-center gap-2 w-full justify-between">
+                <span className="text-xs text-gray-500">{cartQty} no carrinho</span>
+                <button
+                  onClick={onAddWithSizes}
+                  className={`flex items-center gap-1 ${btnRadius} px-3 py-1.5 text-xs font-bold text-white transition active:scale-95`}
+                  style={{ background: color }}
+                >
+                  <span>+</span> Adicionar
+                </button>
+              </div>
             ) : (
               <button
                 onClick={hasSizes ? onAddWithSizes : onAdd}

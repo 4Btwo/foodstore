@@ -9,40 +9,105 @@ import type { Product, ProductSize, Restaurant } from "@/types"
 type View = "menu" | "cart" | "pix" | "success"
 type CartItem = { product: Product; qty: number; size?: string; unitPrice: number }
 
-// Popup para selecionar tamanho
+// Popup para selecionar tamanho + quantidade
 function SizePickerModal({
   product, primaryColor, onSelect, onClose,
 }: {
   product: Product; primaryColor: string
-  onSelect: (size: ProductSize) => void; onClose: () => void
+  onSelect: (size: ProductSize, qty: number) => void; onClose: () => void
 }) {
+  const [selected, setSelected] = useState<ProductSize | null>(null)
+  const [qty, setQty]           = useState(1)
+
+  const maxQty = product.stock ?? 99
+
+  function confirm() {
+    if (!selected) return
+    onSelect(selected, qty)
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={onClose}>
       <div className="w-full max-w-md rounded-t-3xl bg-white p-6 pb-8" onClick={(e) => e.stopPropagation()}>
         <div className="mb-1 h-1 w-10 rounded-full bg-gray-200 mx-auto" />
         <h3 className="mt-3 mb-1 text-base font-bold text-gray-800">{product.name}</h3>
-        <p className="mb-4 text-xs text-gray-500">Escolha o tamanho</p>
-        <div className="grid grid-cols-3 gap-3">
+        <p className="mb-4 text-xs text-gray-500">Selecione o tamanho desejado</p>
+
+        {/* Seleção de tamanho */}
+        <div className="space-y-2 mb-5">
           {product.sizes!.map((s) => {
             const isOut = product.stock !== null && product.stock !== undefined && product.stock <= 0
+            const isSel = selected?.label === s.label
             return (
               <button
                 key={s.label}
-                onClick={() => !isOut && onSelect(s)}
+                onClick={() => { if (!isOut) { setSelected(s); setQty(1) } }}
                 disabled={isOut}
-                className={`flex flex-col items-center rounded-2xl border-2 py-4 transition ${
-                  isOut ? 'border-gray-100 opacity-40' : 'border-gray-200 hover:border-gray-400 active:scale-95'
+                className={`w-full flex items-center justify-between rounded-2xl border-2 px-4 py-3.5 transition ${
+                  isOut  ? 'border-gray-100 opacity-40 cursor-not-allowed'
+                  : isSel ? 'border-brand-500 bg-brand-50'
+                  : 'border-gray-200 hover:border-gray-300 active:scale-98'
                 }`}
               >
-                <span className="text-xl font-bold text-gray-800">{s.label}</span>
-                <span className="text-sm font-semibold mt-1" style={{ color: primaryColor }}>
+                <div className="flex items-center gap-3">
+                  <span className={`flex h-8 w-8 items-center justify-center rounded-xl text-sm font-black text-white`}
+                    style={{ backgroundColor: isSel ? primaryColor : '#9ca3af' }}>
+                    {s.label}
+                  </span>
+                  <span className="font-semibold text-gray-800">Tamanho {s.label}</span>
+                </div>
+                <span className="font-bold text-sm" style={{ color: primaryColor }}>
                   R$ {s.price.toFixed(2)}
                 </span>
               </button>
             )
           })}
         </div>
-        <button onClick={onClose} className="mt-4 w-full rounded-xl border border-gray-200 py-2.5 text-sm text-gray-500">Cancelar</button>
+
+        {/* Seletor de quantidade — só aparece após escolher tamanho */}
+        {selected && (
+          <div className="mb-5 rounded-2xl border border-gray-200 p-4">
+            <p className="text-xs text-gray-500 mb-3">Quantidade</p>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={() => setQty((q) => Math.max(1, q - 1))}
+                  className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-gray-200 text-xl font-bold text-gray-600 hover:border-gray-400 active:scale-90"
+                >
+                  −
+                </button>
+                <span className="text-2xl font-black text-gray-900 w-8 text-center">{qty}</span>
+                <button
+                  onClick={() => setQty((q) => Math.min(maxQty, q + 1))}
+                  disabled={qty >= maxQty}
+                  className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-gray-200 text-xl font-bold text-gray-600 hover:border-gray-400 active:scale-90 disabled:opacity-40"
+                >
+                  +
+                </button>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-gray-400">Total</p>
+                <p className="text-lg font-black" style={{ color: primaryColor }}>
+                  R$ {(selected.price * qty).toFixed(2)}
+                </p>
+              </div>
+            </div>
+            {product.stock !== null && product.stock !== undefined && (
+              <p className="text-xs text-amber-500 mt-2">⚠ {product.stock} disponíveis</p>
+            )}
+          </div>
+        )}
+
+        {/* Botões */}
+        <button
+          onClick={confirm}
+          disabled={!selected}
+          className="w-full rounded-xl py-3.5 text-sm font-bold text-white transition disabled:opacity-40 disabled:cursor-not-allowed active:scale-98"
+          style={{ backgroundColor: selected ? primaryColor : '#9ca3af' }}
+        >
+          {selected ? `Adicionar ${qty}x ${selected.label} — R$ ${(selected.price * qty).toFixed(2)}` : 'Selecione um tamanho'}
+        </button>
+        <button onClick={onClose} className="mt-3 w-full rounded-xl border border-gray-200 py-2.5 text-sm text-gray-500">Cancelar</button>
       </div>
     </div>
   )
@@ -368,7 +433,7 @@ export default function CustomerMenuPage() {
         <SizePickerModal
           product={sizePicker}
           primaryColor={primaryColor}
-          onSelect={(s) => { tryAddToCart(sizePicker, s.label, s.price); setSizePicker(null) }}
+          onSelect={(s, qty) => { for (let i = 0; i < qty; i++) tryAddToCart(sizePicker, s.label, s.price); setSizePicker(null) }}
           onClose={() => setSizePicker(null)}
         />
       )}

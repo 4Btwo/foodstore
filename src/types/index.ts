@@ -201,13 +201,16 @@ export interface DeliveryRun {
   restaurantId: string
   deliveryUserId: string
   deliveryName: string
-  orderId:      string        // marmita_order id
+  orderId:      string
+  orderOrigin?: 'marmita' | 'balcao' | 'online'  // qual collection atualizar ao entregar
   customerName: string
   address:      string
+  phone?:       string
   total:        number
   status:       'assigned' | 'delivered'
   createdAt:    Date
   deliveredAt?: Date
+  notes?:       string
 }
 
 // ─── Central de Pedidos — tipo unificado ─────────────────────────────────────

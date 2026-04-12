@@ -22,10 +22,12 @@ import { usePrintAgent } from '@/hooks/usePrintAgent'
 import { PrintAgentFAB } from '@/components/PrintAgentPanel'
 import {
   subscribeAllOrders,
+  subscribeOrderHistory,
   confirmOrder,
   advanceOrder,
   cancelOrder,
   createBalcaoOrder,
+  deleteOrderFromHistory,
 } from '@/services/unifiedOrders'
 import { subscribeUsers } from '@/services/users'
 import { subscribeAllProducts } from '@/services/productsAdmin'
@@ -223,7 +225,7 @@ function BillModal({
           {paymentMethod && (
             <button
               onClick={() => handleClose(paymentMethod)}
-              disabled={closing || printing}
+              disabled={closing}
               className="w-full rounded-xl bg-green-600 py-3 text-sm font-bold text-white hover:bg-green-700 disabled:opacity-50"
             >
               {closing ? '…' : `✅ Fechar e imprimir · ${paymentMethod}`}
@@ -237,9 +239,8 @@ function BillModal({
           </button>
           {paymentMethod && (
             <button
-              onClick={() => handlePrintBill(paymentMethod)}
-              
-              className="w-full rounded-xl border border-gray-200 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              onClick={() => createBillJob(order, paymentMethod, serviceRate).catch(console.error)}
+              className="w-full rounded-xl border border-gray-200 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
             >
               🖨️ Reimprimir cupom
             </button>
@@ -695,6 +696,8 @@ export default function OrdersCenterPage() {
   const { restaurantId }          = useAuth()
   const agent                     = usePrintAgent(restaurantId ?? '', 'central')
   const [orders, setOrders]       = useState<UnifiedOrder[]>([])
+  const [doneOrders, setDoneOrders]   = useState<UnifiedOrder[]>([])
+  const [historyLimit, setHistoryLimit] = useState(60)
   const [deliverers, setDeliverers] = useState<AppUser[]>([])
   const [products, setProducts]   = useState<Product[]>([])
   const [loading, setLoading]     = useState(true)
@@ -713,11 +716,12 @@ export default function OrdersCenterPage() {
       setDeliverers(users.filter((u) => u.role === 'delivery'))
     })
     const u3 = subscribeAllProducts(restaurantId, setProducts)
-    return () => { u1(); u2(); u3() }
-  }, [restaurantId])
+    const u4 = subscribeOrderHistory(restaurantId, setDoneOrders, historyLimit)
+    return () => { u1(); u2(); u3(); u4() }
+  }, [restaurantId, historyLimit])
 
   const activeOrders = orders.filter((o) => !DONE.includes(o.status))
-  const doneOrders   = orders.filter((o) =>  DONE.includes(o.status)).slice(0, 50)
+  // doneOrders comes from subscribeOrderHistory (separate subscription)
 
   const displayed = (tab === 'active' ? activeOrders : doneOrders)
     .filter((o) => filter === 'all' || o.origin === filter)
@@ -784,7 +788,10 @@ export default function OrdersCenterPage() {
               tab === t ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            {t === 'active' ? `Ativos (${activeOrders.length})` : `Concluídos (${doneOrders.length})`}
+            {t === 'active'
+              ? `Ativos (${activeOrders.length})`
+              : `Concluídos (${doneOrders.length}${doneOrders.length >= historyLimit ? '+' : ''})`
+            }
           </button>
         ))}
       </div>
@@ -811,17 +818,42 @@ export default function OrdersCenterPage() {
             )}
           </div>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {displayed.map((order) => (
-              <OrderCard
-                key={order.id}
-                order={order}
-                deliverers={deliverers}
-                onAssign={setAssignTarget}
-                onBill={setBillTarget}
-              />
-            ))}
-          </div>
+          <>
+            {tab === 'done' && doneOrders.length > 0 && (
+              <div className="flex justify-end mb-2">
+                <button
+                  onClick={async () => {
+                    if (!confirm(`Excluir todos os ${doneOrders.length} registros do histórico? Esta ação não pode ser desfeita.`)) return
+                    await Promise.all(doneOrders.map((o) => deleteOrderFromHistory(o).catch(console.error)))
+                  }}
+                  className="rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-100"
+                >
+                  🗑️ Limpar histórico
+                </button>
+              </div>
+            )}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {displayed.map((order) => (
+                <OrderCard
+                  key={order.id}
+                  order={order}
+                  deliverers={deliverers}
+                  onAssign={setAssignTarget}
+                  onBill={setBillTarget}
+                />
+              ))}
+            </div>
+            {tab === 'done' && doneOrders.length >= historyLimit && (
+              <div className="flex justify-center mt-4 pb-4">
+                <button
+                  onClick={() => setHistoryLimit((l) => l + 60)}
+                  className="rounded-xl border border-gray-300 bg-white px-6 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 shadow-sm"
+                >
+                  + Ver mais (+60)
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
 

@@ -7,6 +7,7 @@ import { Layout, PageHeader } from '@/components/Layout'
 import { useDashboard } from '@/hooks/useDashboard'
 import { useTables } from '@/hooks/useTables'
 import { subscribeMarmitaDashboard } from '@/services/marmitaria'
+import { subscribeOnlineOrders } from '@/services/onlineOrders'
 import { useAuth } from '@/hooks/useAuth'
 
 function MetricCard({
@@ -32,6 +33,7 @@ export default function DashboardPage() {
   const { tables }           = useTables()
 
   const [marmitaData, setMarmitaData] = useState({ salesToday: 0, ordersToday: 0 })
+  const [onlineData, setOnlineData]   = useState({ salesToday: 0, ordersToday: 0 })
 
   useEffect(() => {
     if (!restaurantId) return
@@ -39,12 +41,29 @@ export default function DashboardPage() {
     return unsub
   }, [restaurantId])
 
+  useEffect(() => {
+    if (!restaurantId) return
+    const today = new Date(); today.setHours(0, 0, 0, 0)
+    const unsub = subscribeOnlineOrders(restaurantId, (orders) => {
+      const delivered = orders.filter((o) => {
+        const isDelivered = o.status === 'delivered'
+        const isToday = o.createdAt >= today
+        return isDelivered && isToday
+      })
+      setOnlineData({
+        salesToday:  delivered.reduce((s, o) => s + (o.total ?? 0), 0),
+        ordersToday: delivered.length,
+      })
+    })
+    return unsub
+  }, [restaurantId])
+
   const tablesFree     = tables.filter((t) => t.status === 'free').length
   const tablesOccupied = tables.filter((t) => t.status !== 'free').length
   const occupancy      = tables.length > 0 ? Math.round((tablesOccupied / tables.length) * 100) : 0
 
-  const totalVendas  = metrics.salesToday + marmitaData.salesToday
-  const totalPedidos = metrics.ordersToday + marmitaData.ordersToday
+  const totalVendas  = metrics.salesToday + marmitaData.salesToday + onlineData.salesToday
+  const totalPedidos = metrics.ordersToday + marmitaData.ordersToday + onlineData.ordersToday
   const avgTicket    = totalPedidos > 0 ? totalVendas / totalPedidos : 0
 
   const today = new Date().toLocaleDateString('pt-BR', {
@@ -67,7 +86,7 @@ export default function DashboardPage() {
             <MetricCard
               label="Vendas hoje (total)"
               value={fmt(totalVendas)}
-              sub="mesas + marmitaria"
+              sub="mesas + marmitaria + online"
             />
             <MetricCard
               label="Pedidos"
@@ -100,6 +119,24 @@ export default function DashboardPage() {
               <div className="rounded-xl bg-white p-4 shadow-sm">
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Pedidos entregues</p>
                 <p className="mt-1 text-xl font-bold text-purple-700">{marmitaData.ordersToday}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Bloco online */}
+          <div className="rounded-2xl border border-blue-100 bg-blue-50 p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-lg">🌐</span>
+              <p className="text-sm font-semibold text-blue-700">Pedidos Online — hoje</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="rounded-xl bg-white p-4 shadow-sm">
+                <p className="text-xs text-gray-500 uppercase tracking-wide">Vendas entregues</p>
+                <p className="mt-1 text-xl font-bold text-blue-700">{fmt(onlineData.salesToday)}</p>
+              </div>
+              <div className="rounded-xl bg-white p-4 shadow-sm">
+                <p className="text-xs text-gray-500 uppercase tracking-wide">Pedidos entregues</p>
+                <p className="mt-1 text-xl font-bold text-blue-700">{onlineData.ordersToday}</p>
               </div>
             </div>
           </div>

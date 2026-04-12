@@ -29,13 +29,77 @@ const ROLE_COLOR: Record<Role, string> = {
 
 const SUB_ROLES: Role[] = ['admin', 'cashier', 'waiter', 'kitchen', 'delivery']
 
+// ─── Componentes utilitários ──────────────────────────────────────────────────
+function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="mb-5 flex items-center justify-between">
+          <h2 className="text-base font-bold text-gray-900">{title}</h2>
+          <button onClick={onClose} className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">✕</button>
+        </div>
+        <div className="space-y-4">{children}</div>
+      </div>
+    </div>
+  )
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500">{label}</label>
+      {children}
+    </div>
+  )
+}
+
+function SAInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <input
+      {...props}
+      className={`w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-500/10 ${props.className ?? ''}`}
+    />
+  )
+}
+
+function ErrorBox({ msg }: { msg: string }) {
+  return <div className="rounded-xl bg-red-50 px-4 py-2.5 text-sm text-red-600">{msg}</div>
+}
+
+function ModalFooter({ onClose, onSave, saving, label }: {
+  onClose: () => void; onSave: () => void; saving: boolean; label: string
+}) {
+  return (
+    <div className="mt-2 flex gap-2 pt-2">
+      <button
+        onClick={onClose}
+        className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
+      >
+        Cancelar
+      </button>
+      <button
+        onClick={onSave}
+        disabled={saving}
+        className="flex-1 rounded-xl bg-brand-600 py-2.5 text-sm font-bold text-white hover:bg-brand-700 disabled:opacity-50"
+      >
+        {saving ? 'Salvando…' : label}
+      </button>
+    </div>
+  )
+}
+
 // ─── Modal: Novo Restaurante ──────────────────────────────────────────────────
-function NewRestaurantModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
-  const [name, setName]       = useState('')
-  const [color, setColor]     = useState('#f97316')
-  const [rate, setRate]       = useState(10)
-  const [saving, setSaving]   = useState(false)
-  const [error, setError]     = useState('')
+function NewRestaurantModal({ onClose, onCreated }: {
+  onClose: () => void; onCreated: (id: string) => void
+}) {
+  const [name, setName]     = useState('')
+  const [color, setColor]   = useState('#f97316')
+  const [rate, setRate]     = useState(10)
+  const [saving, setSaving] = useState(false)
+  const [error, setError]   = useState('')
 
   async function handleSave() {
     if (!name.trim()) { setError('Nome obrigatório'); return }
@@ -52,16 +116,26 @@ function NewRestaurantModal({ onClose, onCreated }: { onClose: () => void; onCre
     <Modal title="Novo Restaurante" onClose={onClose}>
       {error && <ErrorBox msg={error} />}
       <Field label="Nome do restaurante *">
-        <input className="sa-input" value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Burger House" />
+        <SAInput value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Burger House" />
       </Field>
       <Field label="Cor principal">
         <div className="flex gap-3 items-center">
-          <input type="color" value={color} onChange={e => setColor(e.target.value)} className="h-10 w-14 rounded-lg border border-gray-200 p-0.5 cursor-pointer" />
-          <input className="sa-input flex-1 font-mono" value={color} onChange={e => setColor(e.target.value)} maxLength={7} />
+          <input
+            type="color" value={color} onChange={e => setColor(e.target.value)}
+            className="h-10 w-14 rounded-lg border border-gray-200 p-0.5 cursor-pointer"
+          />
+          <SAInput className="flex-1 font-mono" value={color} onChange={e => setColor(e.target.value)} maxLength={7} />
         </div>
       </Field>
       <Field label={`Taxa de serviço: ${rate}%`}>
-        <input type="range" min={0} max={20} step={1} value={rate} onChange={e => setRate(Number(e.target.value))} className="w-full" />
+        <input
+          type="range" min={0} max={20} step={1} value={rate}
+          onChange={e => setRate(Number(e.target.value))}
+          className="w-full accent-brand-500"
+        />
+        <div className="flex justify-between text-xs text-gray-400 mt-1">
+          <span>0%</span><span>20%</span>
+        </div>
       </Field>
       <ModalFooter onClose={onClose} onSave={handleSave} saving={saving} label="Criar restaurante" />
     </Modal>
@@ -96,20 +170,22 @@ function NewUserModal({ restaurantId, restaurantName, onClose }: {
     <Modal title={`Novo usuário — ${restaurantName}`} onClose={onClose}>
       {error && <ErrorBox msg={error} />}
       <Field label="Nome completo *">
-        <input className="sa-input" value={name} onChange={e => setName(e.target.value)} placeholder="Nome do usuário" />
+        <SAInput value={name} onChange={e => setName(e.target.value)} placeholder="Nome do usuário" />
       </Field>
       <Field label="E-mail *">
-        <input className="sa-input" type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="usuario@email.com" />
+        <SAInput type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="usuario@email.com" />
       </Field>
       <Field label="Senha *">
-        <input className="sa-input" type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Mín. 6 caracteres" />
+        <SAInput type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Mín. 6 caracteres" />
       </Field>
       <Field label="Função">
         <div className="grid grid-cols-2 gap-2">
           {SUB_ROLES.map(r => (
             <button key={r} onClick={() => setRole(r)}
               className={`rounded-xl border px-3 py-2.5 text-sm font-medium transition text-left ${
-                role === r ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                role === r
+                  ? 'border-brand-500 bg-brand-50 text-brand-700'
+                  : 'border-gray-200 text-gray-600 hover:bg-gray-50'
               }`}>
               {ROLE_LABEL[r]}
             </button>
@@ -121,10 +197,10 @@ function NewUserModal({ restaurantId, restaurantName, onClose }: {
   )
 }
 
-// ─── Modal: Permissões do usuário ──────────────────────────────────────────────
+// ─── Modal: Permissões do usuário ─────────────────────────────────────────────
 function PermissionsModal({ user, onClose }: { user: AppUser; onClose: () => void }) {
-  const defaultMods  = DEFAULT_MODULES[user.role] ?? []
-  const currentMods  = user.visibleModules ?? defaultMods
+  const defaultMods = DEFAULT_MODULES[user.role] ?? []
+  const currentMods = user.visibleModules ?? defaultMods
   const [selected, setSelected] = useState<Set<AppModule>>(new Set(currentMods))
   const [saving, setSaving]     = useState(false)
 
@@ -149,19 +225,23 @@ function PermissionsModal({ user, onClose }: { user: AppUser; onClose: () => voi
 
   return (
     <Modal title={`Permissões — ${user.name}`} onClose={onClose}>
-      <p className="mb-3 text-xs text-gray-500">Defina quais módulos este usuário pode acessar no menu lateral.</p>
-      <button onClick={resetToDefault} className="mb-4 text-xs text-indigo-600 hover:underline">↺ Restaurar padrão da função ({ROLE_LABEL[user.role]})</button>
+      <p className="text-xs text-gray-500">Defina quais módulos este usuário pode acessar no menu lateral.</p>
+      <button onClick={resetToDefault} className="text-xs text-brand-600 hover:underline">
+        ↺ Restaurar padrão da função ({ROLE_LABEL[user.role]})
+      </button>
       <div className="grid grid-cols-2 gap-2">
         {ALL_MODULES.map(({ key, label, icon }) => {
           const on = selected.has(key)
           return (
             <button key={key} onClick={() => toggle(key)}
               className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition ${
-                on ? 'border-indigo-400 bg-indigo-50 text-indigo-700' : 'border-gray-100 text-gray-400 hover:bg-gray-50'
+                on
+                  ? 'border-brand-400 bg-brand-50 text-brand-700'
+                  : 'border-gray-100 text-gray-400 hover:bg-gray-50'
               }`}>
               <span>{icon}</span>
               <span className="text-xs">{label}</span>
-              <span className={`ml-auto h-4 w-4 rounded-full border-2 ${on ? 'border-indigo-500 bg-indigo-500' : 'border-gray-300'}`} />
+              <span className={`ml-auto h-4 w-4 rounded-full border-2 ${on ? 'border-brand-500 bg-brand-500' : 'border-gray-300'}`} />
             </button>
           )
         })}
@@ -171,7 +251,60 @@ function PermissionsModal({ user, onClose }: { user: AppUser; onClose: () => voi
   )
 }
 
-// ─── Card de restaurante com usuários ─────────────────────────────────────────
+// ─── Modal: Editar Restaurante ────────────────────────────────────────────────
+function EditRestaurantModal({ restaurant, onClose }: { restaurant: Restaurant; onClose: () => void }) {
+  const [name, setName]   = useState(restaurant.name)
+  const [color, setColor] = useState(restaurant.primaryColor)
+  const [rate, setRate]   = useState(Math.round((restaurant.serviceRate ?? 0) * 100))
+  const [saving, setSaving] = useState(false)
+  const [error, setError]   = useState('')
+
+  async function handleSave() {
+    if (!name.trim()) { setError('Nome obrigatório'); return }
+    setSaving(true); setError('')
+    try {
+      await updateRestaurantById(restaurant.id, {
+        name: name.trim(),
+        primaryColor: color,
+        serviceRate: rate / 100,
+      })
+      onClose()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro ao salvar')
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <Modal title={`Editar — ${restaurant.name}`} onClose={onClose}>
+      {error && <ErrorBox msg={error} />}
+      <Field label="Nome do restaurante *">
+        <SAInput value={name} onChange={e => setName(e.target.value)} />
+      </Field>
+      <Field label="Cor principal">
+        <div className="flex gap-3 items-center">
+          <input
+            type="color" value={color} onChange={e => setColor(e.target.value)}
+            className="h-10 w-14 rounded-lg border border-gray-200 p-0.5 cursor-pointer"
+          />
+          <SAInput className="flex-1 font-mono" value={color} onChange={e => setColor(e.target.value)} maxLength={7} />
+        </div>
+      </Field>
+      <Field label={`Taxa de serviço: ${rate}%`}>
+        <input
+          type="range" min={0} max={20} step={1} value={rate}
+          onChange={e => setRate(Number(e.target.value))}
+          className="w-full accent-brand-500"
+        />
+        <div className="flex justify-between text-xs text-gray-400 mt-1">
+          <span>0%</span><span>20%</span>
+        </div>
+      </Field>
+      <ModalFooter onClose={onClose} onSave={handleSave} saving={saving} label="Salvar alterações" />
+    </Modal>
+  )
+}
+
+// ─── Card de restaurante com usuários ────────────────────────────────────────
 function RestaurantCard({
   restaurant, expanded, onToggle, onAddUser, onDeleteRestaurant,
 }: {
@@ -181,8 +314,9 @@ function RestaurantCard({
   onAddUser: () => void
   onDeleteRestaurant: () => void
 }) {
-  const [users, setUsers]         = useState<AppUser[]>([])
-  const [permUser, setPermUser]   = useState<AppUser | null>(null)
+  const [users, setUsers]       = useState<AppUser[]>([])
+  const [permUser, setPermUser] = useState<AppUser | null>(null)
+  const [editOpen, setEditOpen] = useState(false)
 
   useEffect(() => {
     if (!expanded) return
@@ -203,35 +337,57 @@ function RestaurantCard({
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-      {/* Header do restaurante */}
+    <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:shadow-md">
+      {/* Header */}
       <div className="flex items-center gap-4 px-5 py-4">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg font-black text-white shadow-sm"
-          style={{ background: restaurant.primaryColor }}>
+        <div
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg font-black text-white shadow-sm"
+          style={{ background: restaurant.primaryColor }}
+        >
           {restaurant.name.charAt(0)}
         </div>
         <div className="flex-1 min-w-0">
           <p className="font-bold text-gray-900">{restaurant.name}</p>
-          <p className="text-xs text-gray-400">ID: <span className="font-mono select-all">{restaurant.id}</span> · Taxa: {(restaurant.serviceRate * 100).toFixed(0)}% · <span style={{color: restaurant.primaryColor}}>●</span> cor</p>
+          <p className="text-xs text-gray-400">
+            ID: <span className="font-mono select-all">{restaurant.id}</span>
+            {' · '}Taxa: {(restaurant.serviceRate * 100).toFixed(0)}%
+            {' · '}<span style={{ color: restaurant.primaryColor }}>●</span> cor
+          </p>
         </div>
         <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
           <button
-            onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/pedido/${restaurant.id}`); alert('Link copiado!') }}
+            onClick={() => {
+              navigator.clipboard.writeText(`${window.location.origin}/pedido/${restaurant.id}`)
+              alert('Link copiado!')
+            }}
             className="rounded-xl border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50"
             title="Copiar link de pedidos online"
           >
             🔗 Link
           </button>
-          <button onClick={onAddUser}
-            className="rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700">
+          <button
+            onClick={() => setEditOpen(true)}
+            className="rounded-xl border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+            title="Editar restaurante"
+          >
+            ✏️ Editar
+          </button>
+          <button
+            onClick={onAddUser}
+            className="rounded-xl bg-brand-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-brand-700"
+          >
             + Usuário
           </button>
-          <button onClick={onDeleteRestaurant}
-            className="rounded-xl border border-red-200 px-3 py-1.5 text-xs font-bold text-red-500 hover:bg-red-50">
+          <button
+            onClick={onDeleteRestaurant}
+            className="rounded-xl border border-red-200 px-3 py-1.5 text-xs font-bold text-red-500 hover:bg-red-50"
+          >
             🗑
           </button>
-          <button onClick={onToggle}
-            className="rounded-xl border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50">
+          <button
+            onClick={onToggle}
+            className="rounded-xl border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50"
+          >
             {expanded ? '▲ Fechar' : '▼ Usuários'}
           </button>
         </div>
@@ -274,33 +430,45 @@ function RestaurantCard({
                           {ROLE_LABEL[u.role]}
                         </span>
                       ) : (
-                        <select value={u.role}
+                        <select
+                          value={u.role}
                           onChange={e => handleRoleChange(u, e.target.value as Role)}
-                          className="rounded-lg border border-gray-200 px-2 py-1 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                          className="rounded-lg border border-gray-200 px-2 py-1 text-xs text-gray-700 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        >
                           {SUB_ROLES.map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
                         </select>
                       )}
                     </td>
                     <td className="px-4 py-3 hidden sm:table-cell">
-                      <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${u.disabled ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-700'}`}>
+                      <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                        u.disabled ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-700'
+                      }`}>
                         {u.disabled ? 'Desabilitado' : 'Ativo'}
                       </span>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1.5">
-                        <button onClick={() => setPermUser(u)}
-                          className="rounded-lg border border-indigo-200 px-2 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50"
-                          title="Permissões">
+                        <button
+                          onClick={() => setPermUser(u)}
+                          className="rounded-lg border border-brand-200 px-2 py-1 text-xs font-medium text-brand-600 hover:bg-brand-50"
+                          title="Permissões"
+                        >
                           🔒 Módulos
                         </button>
-                        <button onClick={() => handleToggleDisable(u)}
+                        <button
+                          onClick={() => handleToggleDisable(u)}
                           className={`rounded-lg border px-2 py-1 text-xs font-medium transition ${
-                            u.disabled ? 'border-green-200 text-green-600 hover:bg-green-50' : 'border-amber-200 text-amber-600 hover:bg-amber-50'
-                          }`}>
+                            u.disabled
+                              ? 'border-green-200 text-green-600 hover:bg-green-50'
+                              : 'border-amber-200 text-amber-600 hover:bg-amber-50'
+                          }`}
+                        >
                           {u.disabled ? 'Ativar' : 'Pausar'}
                         </button>
-                        <button onClick={() => handleDeleteUser(u)}
-                          className="rounded-lg border border-red-100 px-2 py-1 text-xs text-red-400 hover:bg-red-50">
+                        <button
+                          onClick={() => handleDeleteUser(u)}
+                          className="rounded-lg border border-red-100 px-2 py-1 text-xs text-red-400 hover:bg-red-50"
+                        >
                           🗑
                         </button>
                       </div>
@@ -312,38 +480,9 @@ function RestaurantCard({
           )}
         </div>
       )}
-      {permUser && <PermissionsModal user={permUser} onClose={() => setPermUser(null)} />}
-    </div>
-  )
-}
 
-// ─── Componentes utilitários ──────────────────────────────────────────────────
-function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-base font-bold text-gray-900">{title}</h2>
-          <button onClick={onClose} className="text-xl text-gray-400 hover:text-gray-600">✕</button>
-        </div>
-        <div className="space-y-4">{children}</div>
-      </div>
-    </div>
-  )
-}
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div><label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-gray-500">{label}</label>{children}</div>
-}
-function ErrorBox({ msg }: { msg: string }) {
-  return <div className="rounded-xl bg-red-50 px-4 py-2.5 text-sm text-red-600">{msg}</div>
-}
-function ModalFooter({ onClose, onSave, saving, label }: { onClose: () => void; onSave: () => void; saving: boolean; label: string }) {
-  return (
-    <div className="mt-2 flex gap-2 pt-2">
-      <button onClick={onClose} className="flex-1 rounded-xl border border-gray-200 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50">Cancelar</button>
-      <button onClick={onSave} disabled={saving} className="flex-1 rounded-xl bg-indigo-600 py-2.5 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50">
-        {saving ? 'Salvando…' : label}
-      </button>
+      {permUser && <PermissionsModal user={permUser} onClose={() => setPermUser(null)} />}
+      {editOpen  && <EditRestaurantModal restaurant={restaurant} onClose={() => setEditOpen(false)} />}
     </div>
   )
 }
@@ -351,12 +490,12 @@ function ModalFooter({ onClose, onSave, saving, label }: { onClose: () => void; 
 // ─── Página principal ─────────────────────────────────────────────────────────
 export default function SuperAdminPage() {
   const navigate = useNavigate()
-  const [restaurants, setRestaurants] = useState<Restaurant[]>([])
-  const [loading, setLoading]         = useState(true)
-  const [expanded, setExpanded]       = useState<string | null>(null)
+  const [restaurants, setRestaurants]   = useState<Restaurant[]>([])
+  const [loading, setLoading]           = useState(true)
+  const [expanded, setExpanded]         = useState<string | null>(null)
   const [newRestModal, setNewRestModal] = useState(false)
-  const [newUserFor, setNewUserFor]    = useState<Restaurant | null>(null)
-  const [search, setSearch]           = useState('')
+  const [newUserFor, setNewUserFor]     = useState<Restaurant | null>(null)
+  const [search, setSearch]             = useState('')
 
   useEffect(() => {
     return subscribeAllRestaurants((list) => {
@@ -376,91 +515,96 @@ export default function SuperAdminPage() {
   )
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
+    <div className="flex h-screen flex-col bg-gray-50">
       {/* Topbar */}
-      <header className="sticky top-0 z-20 flex items-center justify-between border-b border-gray-800 bg-gray-900 px-6 py-4">
+      <header className="sticky top-0 z-20 flex items-center justify-between border-b border-gray-100 bg-white px-4 md:px-6 py-3 md:py-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-yellow-500 text-sm font-black text-gray-900">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-yellow-400 text-sm font-black text-gray-900 shadow-sm">
             👑
           </div>
           <div>
-            <p className="font-black text-white">Super Admin</p>
-            <p className="text-xs text-gray-400">Controle total da plataforma</p>
+            <p className="font-bold text-gray-800 text-base">Super Admin</p>
+            <p className="text-xs text-gray-400">Controle total da plataforma · FoodStore</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="hidden sm:block text-xs text-gray-500">FoodStore Platform</span>
-          <button
-            onClick={async () => { await signOut(); navigate('/login') }}
-            className="rounded-xl border border-gray-700 px-4 py-2 text-xs text-gray-400 hover:bg-gray-800"
-          >
-            Sair
-          </button>
-        </div>
+        <button
+          onClick={async () => { await signOut(); navigate('/login') }}
+          className="rounded-xl border border-gray-200 px-4 py-2 text-xs text-gray-500 hover:bg-gray-50"
+        >
+          Sair
+        </button>
       </header>
 
-      <main className="mx-auto max-w-5xl px-4 py-6">
-        {/* Stats */}
-        <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <div className="rounded-2xl bg-gray-800 p-4">
-            <p className="text-2xl font-black text-white">{restaurants.length}</p>
-            <p className="text-xs text-gray-400">Restaurantes</p>
-          </div>
-          <div className="rounded-2xl bg-gray-800 p-4">
-            <p className="text-2xl font-black text-yellow-400">Ativo</p>
-            <p className="text-xs text-gray-400">Status da plataforma</p>
-          </div>
-          <div className="col-span-2 sm:col-span-1 rounded-2xl bg-indigo-900/60 border border-indigo-700 p-4">
-            <p className="text-2xl font-black text-indigo-300">Full</p>
-            <p className="text-xs text-indigo-400">Nível de acesso</p>
-          </div>
-        </div>
+      <main className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-5xl px-4 py-6 space-y-6">
 
-        {/* Barra de ações */}
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="🔍 Buscar restaurante…"
-            className="rounded-xl border border-gray-700 bg-gray-800 px-4 py-2.5 text-sm text-white placeholder-gray-500 outline-none focus:border-indigo-500 sm:w-64"
-          />
-          <button
-            onClick={() => setNewRestModal(true)}
-            className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-indigo-700"
-          >
-            + Novo restaurante
-          </button>
-        </div>
+          {/* Stats */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+              <p className="text-2xl font-black text-gray-900">{restaurants.length}</p>
+              <p className="text-xs text-gray-400 mt-0.5">Restaurantes</p>
+            </div>
+            <div className="rounded-2xl border border-green-100 bg-green-50 p-4 shadow-sm">
+              <p className="text-2xl font-black text-green-600">Ativo</p>
+              <p className="text-xs text-green-500 mt-0.5">Status da plataforma</p>
+            </div>
+            <div className="col-span-2 sm:col-span-1 rounded-2xl border border-yellow-200 bg-yellow-50 p-4 shadow-sm">
+              <p className="text-2xl font-black text-yellow-700">Full</p>
+              <p className="text-xs text-yellow-500 mt-0.5">Nível de acesso</p>
+            </div>
+          </div>
 
-        {/* Lista de restaurantes */}
-        {loading ? (
-          <div className="flex justify-center py-20">
-            <div className="h-10 w-10 animate-spin rounded-full border-4 border-indigo-500 border-t-transparent" />
+          {/* Barra de ações */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="🔍 Buscar restaurante…"
+              className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-800 outline-none placeholder-gray-400 focus:border-brand-400 focus:ring-2 focus:ring-brand-500/10 sm:w-72"
+            />
+            <button
+              onClick={() => setNewRestModal(true)}
+              className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-brand-700 transition"
+            >
+              + Novo restaurante
+            </button>
           </div>
-        ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-20 text-gray-500">
-            <span className="text-5xl">🏪</span>
-            <p className="text-sm">{search ? 'Nenhum restaurante encontrado' : 'Nenhum restaurante cadastrado'}</p>
-            {!search && (
-              <button onClick={() => setNewRestModal(true)} className="mt-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-indigo-700">
-                Criar primeiro restaurante
-              </button>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {filtered.map(r => (
-              <RestaurantCard
-                key={r.id}
-                restaurant={r}
-                expanded={expanded === r.id}
-                onToggle={() => setExpanded(expanded === r.id ? null : r.id)}
-                onAddUser={() => setNewUserFor(r)}
-                onDeleteRestaurant={() => handleDeleteRestaurant(r)}
-              />
-            ))}
-          </div>
-        )}
+
+          {/* Lista */}
+          {loading ? (
+            <div className="flex justify-center py-20">
+              <div className="h-10 w-10 animate-spin rounded-full border-4 border-brand-500 border-t-transparent" />
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-20 text-gray-400">
+              <span className="text-5xl">🏪</span>
+              <p className="text-sm">
+                {search ? 'Nenhum restaurante encontrado' : 'Nenhum restaurante cadastrado'}
+              </p>
+              {!search && (
+                <button
+                  onClick={() => setNewRestModal(true)}
+                  className="mt-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-brand-700"
+                >
+                  Criar primeiro restaurante
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {filtered.map(r => (
+                <RestaurantCard
+                  key={r.id}
+                  restaurant={r}
+                  expanded={expanded === r.id}
+                  onToggle={() => setExpanded(expanded === r.id ? null : r.id)}
+                  onAddUser={() => setNewUserFor(r)}
+                  onDeleteRestaurant={() => handleDeleteRestaurant(r)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </main>
 
       {newRestModal && (
