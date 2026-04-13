@@ -18,6 +18,7 @@ import MarmitariaAdminPage   from '@/pages/MarmitariaAdmin'
 import DeliveryDashboardPage from '@/pages/DeliveryDashboard'
 import OnlineOrderPage       from '@/pages/OnlineOrder'
 import StoreFrontPage        from '@/pages/StoreFront'
+import LandingPage           from '@/pages/Landing'
 import SuperAdminPage        from '@/pages/SuperAdmin'
 import OrdersCenterPage        from '@/pages/OrdersCenter'
 import OnlineOrdersDashboard   from '@/pages/OnlineOrdersDashboard'
@@ -71,7 +72,7 @@ export default function App() {
           <Route path="/loja"                      element={<StoreFrontPage />} />
           <Route path="/qrcodes" element={<ProtectedRoute allowedRoles={['admin']}><QrCodesPage /></ProtectedRoute>} />
 
-          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="/" element={<LandingPage />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </AuthProvider>

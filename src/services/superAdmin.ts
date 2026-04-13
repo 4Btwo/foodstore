@@ -1,7 +1,7 @@
 import {
   collection, doc, addDoc, updateDoc, deleteDoc,
   onSnapshot, getDocs, query, where,
-  Timestamp, type Unsubscribe, setDoc,
+  Timestamp, type Unsubscribe, setDoc, orderBy,
 } from 'firebase/firestore'
 import { auth, db } from './firebase'
 import type { AppModule, AppUser, Restaurant, Role } from '@/types'
@@ -151,3 +151,44 @@ export const ALL_MODULES: { key: AppModule; label: string; icon: string }[] = [
   { key: 'qrcodes',       label: 'QR Codes',          icon: '📷' },
   { key: 'settings',      label: 'Configurações',     icon: '⚙️' },
 ]
+
+// ─── Leads (captação de restaurantes interessados) ──────────────────────────
+
+export type LeadStatus = 'novo' | 'contatado' | 'convertido' | 'perdido'
+
+export interface Lead {
+  id:          string
+  nome:        string
+  email:       string
+  whatsapp?:   string
+  restaurante: string
+  plano:       string
+  mensagem?:   string
+  status:      LeadStatus
+  createdAt:   Date
+}
+
+export async function createLead(data: Omit<Lead, 'id' | 'status' | 'createdAt'>): Promise<void> {
+  await addDoc(collection(db, 'leads'), {
+    ...data,
+    status:    'novo' as LeadStatus,
+    createdAt: Timestamp.now(),
+  })
+}
+
+export function subscribeLeads(
+  callback: (leads: Lead[]) => void,
+): Unsubscribe {
+  const q = query(collection(db, 'leads'), orderBy('createdAt', 'desc'))
+  return onSnapshot(q, (snap) => {
+    callback(snap.docs.map((d) => ({
+      id: d.id,
+      ...d.data(),
+      createdAt: d.data().createdAt?.toDate?.() ?? new Date(),
+    }) as Lead))
+  })
+}
+
+export async function updateLeadStatus(id: string, status: LeadStatus): Promise<void> {
+  await updateDoc(doc(db, 'leads', id), { status })
+}

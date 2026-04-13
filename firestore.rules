@@ -111,5 +111,12 @@ service cloud.firestore {
       ));
       allow delete: if hasSuperAccess() || isAdminOf(resource.data.restaurantId);
     }
+
+    // Leads — captação de restaurantes interessados (público cria, só superadmin lê/edita)
+    match /leads/{leadId} {
+      allow create: if true;
+      allow read, update: if hasSuperAccess();
+      allow delete: if hasSuperAccess();
+    }
   }
 }

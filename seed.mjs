@@ -9,13 +9,9 @@ import {
 
 // 🔥 CONFIG
 const firebaseConfig = {
-  apiKey: "AIzaSyAX_oGWiaaO0B2PRDrWNl24ACFPgT7mHrg",
-  authDomain: "foodstore-3a918.firebaseapp.com",
-  projectId: "foodstore-3a918",
-  storageBucket: "foodstore-3a918.firebasestorage.app",
-  messagingSenderId: "207893276255",
-  appId: "1:207893276255:web:ac2c99f213e3cea53dddea",
-  measurementId: "G-6GRZ774YY3"
+  apiKey: "SUA_API_KEY",
+  authDomain: "SEU_DOMINIO",
+  projectId: "SEU_PROJECT_ID",
 };
 
 const app = initializeApp(firebaseConfig);

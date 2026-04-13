@@ -2,7 +2,10 @@ import { useState, useEffect } from 'react'
 import { signOut } from '@/services/auth'
 import { useNavigate } from 'react-router-dom'
 import {
-  subscribeAllRestaurants, subscribeUsersByRestaurant,
+  subscribeAllRestaurants,
+  subscribeLeads,
+  updateLeadStatus,
+  type Lead, type LeadStatus, subscribeUsersByRestaurant,
   createRestaurant, updateRestaurantById, deleteRestaurantById,
   createUserForRestaurant, updateUserById, deleteUserById,
   ALL_MODULES, DEFAULT_MODULES,
@@ -502,6 +505,108 @@ function RestaurantCard({
 }
 
 // ─── Página principal ─────────────────────────────────────────────────────────
+
+// ─── Status badges ────────────────────────────────────────────────────────────
+
+const LEAD_STATUS_CFG: Record<LeadStatus, { label: string; cls: string }> = {
+  novo:       { label: 'Novo',       cls: 'bg-blue-100 text-blue-700' },
+  contatado:  { label: 'Contatado',  cls: 'bg-amber-100 text-amber-700' },
+  convertido: { label: 'Convertido', cls: 'bg-green-100 text-green-700' },
+  perdido:    { label: 'Perdido',    cls: 'bg-gray-100 text-gray-500' },
+}
+
+function LeadsPanel({ leads }: { leads: Lead[] }) {
+  const newCount       = leads.filter(l => l.status === 'novo').length
+  const convertedCount = leads.filter(l => l.status === 'convertido').length
+
+  async function changeStatus(id: string, status: LeadStatus) {
+    await updateLeadStatus(id, status)
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Métricas rápidas */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="rounded-2xl bg-white border border-gray-100 p-4 shadow-sm">
+          <p className="text-2xl font-black text-gray-900">{leads.length}</p>
+          <p className="text-xs text-gray-400 mt-0.5">Total de leads</p>
+        </div>
+        <div className="rounded-2xl bg-blue-50 border border-blue-100 p-4 shadow-sm">
+          <p className="text-2xl font-black text-blue-700">{newCount}</p>
+          <p className="text-xs text-blue-500 mt-0.5">Novos hoje</p>
+        </div>
+        <div className="rounded-2xl bg-green-50 border border-green-100 p-4 shadow-sm">
+          <p className="text-2xl font-black text-green-700">{convertedCount}</p>
+          <p className="text-xs text-green-500 mt-0.5">Convertidos</p>
+        </div>
+      </div>
+
+      {/* Lista de leads */}
+      {leads.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-3 py-20 text-gray-400">
+          <span className="text-5xl">🔥</span>
+          <p className="text-sm">Nenhum lead ainda</p>
+          <p className="text-xs">Os interessados pelo plano aparecerão aqui</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {leads.map((lead) => {
+            const cfg = LEAD_STATUS_CFG[lead.status]
+            const date = lead.createdAt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
+            const time = lead.createdAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+            return (
+              <div key={lead.id} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                <div className="flex items-start justify-between gap-4 flex-wrap">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <span className="font-bold text-gray-900">{lead.nome}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${cfg.cls}`}>{cfg.label}</span>
+                      <span className="text-xs text-gray-400">{date} {time}</span>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-0.5">🍴 <span className="font-medium">{lead.restaurante}</span></p>
+                    <p className="text-xs text-gray-500">📧 {lead.email}</p>
+                    {lead.whatsapp && (
+                      <p className="text-xs text-gray-500">📱 {lead.whatsapp}</p>
+                    )}
+                    <p className="text-xs text-gray-400 mt-0.5">Plano: <span className="font-semibold text-gray-600">{lead.plano}</span></p>
+                    {lead.mensagem && (
+                      <p className="mt-2 rounded-xl bg-gray-50 px-3 py-2 text-xs text-gray-600 italic">"{lead.mensagem}"</p>
+                    )}
+                  </div>
+
+                  {/* Ações */}
+                  <div className="flex flex-col gap-2 shrink-0">
+                    {lead.whatsapp && (
+                      <a
+                        href={`https://wa.me/55${lead.whatsapp.replace(/\D/g, '')}?text=${encodeURIComponent(`Olá ${lead.nome}! Vi seu interesse no FoodStore. Posso te ajudar?`)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center gap-1.5 rounded-xl bg-green-500 px-3 py-2 text-xs font-bold text-white hover:bg-green-600"
+                      >
+                        💬 WhatsApp
+                      </a>
+                    )}
+                    <select
+                      value={lead.status}
+                      onChange={e => changeStatus(lead.id, e.target.value as LeadStatus)}
+                      className="rounded-xl border border-gray-200 px-2 py-1.5 text-xs text-gray-700 outline-none focus:border-brand-400"
+                    >
+                      <option value="novo">Novo</option>
+                      <option value="contatado">Contatado</option>
+                      <option value="convertido">Convertido</option>
+                      <option value="perdido">Perdido</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function SuperAdminPage() {
   const navigate = useNavigate()
   const [restaurants, setRestaurants]   = useState<Restaurant[]>([])
@@ -510,12 +615,16 @@ export default function SuperAdminPage() {
   const [newRestModal, setNewRestModal] = useState(false)
   const [newUserFor, setNewUserFor]     = useState<Restaurant | null>(null)
   const [search, setSearch]             = useState('')
+  const [activeTab, setActiveTab]       = useState<'restaurants' | 'leads'>('restaurants')
+  const [leads, setLeads]               = useState<Lead[]>([])
 
   useEffect(() => {
-    return subscribeAllRestaurants((list) => {
-      setRestaurants(list.sort((a, b) => a.name.localeCompare(b.name)))
+    const u1 = subscribeAllRestaurants((list) => {
+      setRestaurants(list.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')))
       setLoading(false)
     })
+    const u2 = subscribeLeads(setLeads)
+    return () => { u1(); u2() }
   }, [])
 
   async function handleDeleteRestaurant(r: Restaurant) {
@@ -524,7 +633,7 @@ export default function SuperAdminPage() {
   }
 
   const filtered = restaurants.filter(r =>
-    r.name.toLowerCase().includes(search.toLowerCase()) ||
+    (r.name ?? '').toLowerCase().includes(search.toLowerCase()) ||
     r.id.toLowerCase().includes(search.toLowerCase())
   )
 
@@ -578,55 +687,83 @@ export default function SuperAdminPage() {
             </div>
           </div>
 
-          {/* Barra de ações */}
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="🔍 Buscar restaurante…"
-              className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-800 outline-none placeholder-gray-400 focus:border-brand-400 focus:ring-2 focus:ring-brand-500/10 sm:w-72"
-            />
+          {/* Tabs */}
+          <div className="flex gap-1 rounded-2xl bg-gray-100 p-1">
             <button
-              onClick={() => setNewRestModal(true)}
-              className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-brand-700 transition"
+              onClick={() => setActiveTab('restaurants')}
+              className={`flex-1 rounded-xl py-2.5 text-sm font-semibold transition ${activeTab === 'restaurants' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
             >
-              + Novo restaurante
+              🏪 Restaurantes ({restaurants.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('leads')}
+              className={`flex-1 rounded-xl py-2.5 text-sm font-semibold transition ${activeTab === 'leads' ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              🔥 Leads
+              {leads.filter(l => l.status === 'novo').length > 0 && (
+                <span className="ml-1.5 rounded-full bg-red-500 text-white text-xs px-1.5 py-0.5">
+                  {leads.filter(l => l.status === 'novo').length}
+                </span>
+              )}
             </button>
           </div>
 
-          {/* Lista */}
-          {loading ? (
-            <div className="flex justify-center py-20">
-              <div className="h-10 w-10 animate-spin rounded-full border-4 border-brand-500 border-t-transparent" />
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-3 py-20 text-gray-400">
-              <span className="text-5xl">🏪</span>
-              <p className="text-sm">
-                {search ? 'Nenhum restaurante encontrado' : 'Nenhum restaurante cadastrado'}
-              </p>
-              {!search && (
+          {activeTab === 'restaurants' ? (
+            <>
+              {/* Barra de ações restaurantes */}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="🔍 Buscar restaurante…"
+                  className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm text-gray-800 outline-none placeholder-gray-400 focus:border-brand-400 focus:ring-2 focus:ring-brand-500/10 sm:w-72"
+                />
                 <button
                   onClick={() => setNewRestModal(true)}
-                  className="mt-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-brand-700"
+                  className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-brand-700 transition"
                 >
-                  Criar primeiro restaurante
+                  + Novo restaurante
                 </button>
+              </div>
+
+              {/* Lista restaurantes */}
+              {loading ? (
+                <div className="flex justify-center py-20">
+                  <div className="h-10 w-10 animate-spin rounded-full border-4 border-brand-500 border-t-transparent" />
+                </div>
+              ) : filtered.length === 0 ? (
+                <div className="flex flex-col items-center justify-center gap-3 py-20 text-gray-400">
+                  <span className="text-5xl">🏪</span>
+                  <p className="text-sm">
+                    {search ? 'Nenhum restaurante encontrado' : 'Nenhum restaurante cadastrado'}
+                  </p>
+                  {!search && (
+                    <button
+                      onClick={() => setNewRestModal(true)}
+                      className="mt-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-brand-700"
+                    >
+                      Criar primeiro restaurante
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {filtered.map(r => (
+                    <RestaurantCard
+                      key={r.id}
+                      restaurant={r}
+                      expanded={expanded === r.id}
+                      onToggle={() => setExpanded(expanded === r.id ? null : r.id)}
+                      onAddUser={() => setNewUserFor(r)}
+                      onDeleteRestaurant={() => handleDeleteRestaurant(r)}
+                    />
+                  ))}
+                </div>
               )}
-            </div>
+            </>
           ) : (
-            <div className="space-y-4">
-              {filtered.map(r => (
-                <RestaurantCard
-                  key={r.id}
-                  restaurant={r}
-                  expanded={expanded === r.id}
-                  onToggle={() => setExpanded(expanded === r.id ? null : r.id)}
-                  onAddUser={() => setNewUserFor(r)}
-                  onDeleteRestaurant={() => handleDeleteRestaurant(r)}
-                />
-              ))}
-            </div>
+            /* ── Painel de Leads ── */
+            <LeadsPanel leads={leads} />
           )}
         </div>
       </main>
