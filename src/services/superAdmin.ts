@@ -13,11 +13,23 @@ export function subscribeAllRestaurants(
 ): Unsubscribe {
   return onSnapshot(collection(db, 'restaurants'), (snap) => {
     callback(
-      snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-        createdAt: d.data().createdAt?.toDate?.() ?? new Date(),
-      }) as Restaurant),
+      snap.docs.map((d) => {
+        const data = d.data()
+        return {
+          id:             d.id,
+          name:           data.name           ?? '(sem nome)',
+          logo:           data.logo           ?? '',
+          primaryColor:   data.primaryColor   ?? '#6366f1',
+          secondaryColor: data.secondaryColor ?? '#1f2937',
+          serviceRate:    data.serviceRate     ?? 0,
+          createdAt:      data.createdAt?.toDate?.() ?? new Date(),
+          ...data,
+          // Reforça os campos obrigatórios normalizados sobre o spread
+          name:           data.name           ?? '(sem nome)',
+          primaryColor:   data.primaryColor   ?? '#6366f1',
+          serviceRate:    data.serviceRate     ?? 0,
+        } as Restaurant
+      }),
     )
   })
 }

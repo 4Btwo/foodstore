@@ -176,6 +176,8 @@ export interface MarmitaOrderItem {
 export type OnlineOrderStatus = 'new' | 'preparing' | 'ready' | 'out_for_delivery' | 'delivered' | 'cancelled'
 export type OnlineDeliveryType = 'pickup' | 'delivery'
 
+export type OnlinePaymentMethod = 'cash' | 'credit' | 'debit' | 'pix'
+
 export interface OnlineOrder {
   id:             string
   restaurantId:   string
@@ -187,6 +189,7 @@ export interface OnlineOrder {
   total:          number
   status:         OnlineOrderStatus
   createdAt:      Date
+  paymentMethod?: OnlinePaymentMethod
 }
 
 export interface OnlineOrderItem {

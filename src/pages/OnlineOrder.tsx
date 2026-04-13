@@ -1,14 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { getProductsByRestaurant } from '@/services/products'
 import { createOnlineOrder } from '@/services/onlineOrders'
+import { createOnlinePixPayment, checkOnlinePaymentStatus } from '@/services/payments'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '@/services/firebase'
 import type { Product, ProductSize, Restaurant } from '@/types'
 
-type Step = 'menu' | 'cart' | 'info' | 'success'
+type Step = 'menu' | 'cart' | 'info' | 'pix' | 'success'
 type CartItem = { product: Product; qty: number; size?: string; unitPrice: number }
 type DeliveryType = 'pickup' | 'delivery'
+type PaymentMethod = 'cash' | 'credit' | 'debit' | 'pix'
 
 // ─── Modal de tamanhos ─────────────────────────────────────────────────────────
 function SizeModal({
@@ -139,6 +141,15 @@ export default function OnlineOrderPage() {
   const [deliveryType, setDeliveryType]   = useState<DeliveryType>('delivery')
   const [address, setAddress]             = useState('')
   const [notes, setNotes]                 = useState('')
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null)
+  const [changeFor, setChangeFor]         = useState('')       // troco para quanto
+  // PIX state
+  const [pixState, setPixState]   = useState<'idle'|'loading'|'waiting'|'approved'|'error'>('idle')
+  const [pixQrCode, setPixQrCode] = useState('')
+  const [pixBase64, setPixBase64] = useState('')
+  const [pixError, setPixError]   = useState('')
+  const [orderId, setOrderId]     = useState('')
+  const pixPolling = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const color       = restaurant?.primaryColor ?? '#f97316'
   const r           = restaurant as (Restaurant & Record<string, unknown>) | null
@@ -194,20 +205,27 @@ export default function OnlineOrderPage() {
     )
   }
 
+  function stopPixPolling() {
+    if (pixPolling.current) { clearInterval(pixPolling.current); pixPolling.current = null }
+  }
+
   async function handleFinalize() {
     if (!restaurantId || !customerName.trim()) return
     if (deliveryType === 'delivery' && !address.trim()) return
+    if (!paymentMethod) return
     setSending(true)
     try {
-      await createOnlineOrder(
+      const id = await createOnlineOrder(
         restaurantId,
         {
           customerName: customerName.trim(),
-          ...(phone.trim()   ? { phone:   phone.trim()   } : {}),
-          ...(notes.trim()   ? { notes:   notes.trim()   } : {}),
+          ...(phone.trim()   ? { phone: phone.trim() } : {}),
+          ...(notes.trim()   ? { notes: notes.trim() } : {}),
           ...(deliveryType === 'delivery' && address.trim() ? { address: address.trim() } : {}),
           deliveryType,
           total: cartTotal,
+          paymentMethod,
+          ...(paymentMethod === 'cash' && changeFor.trim() ? { changeFor: changeFor.trim() } : {}),
         },
         cart.map((i) => ({
           productId: i.product.id,
@@ -217,7 +235,27 @@ export default function OnlineOrderPage() {
           ...(i.size ? { size: i.size } : {}),
         })),
       )
-      setStep('success')
+      setOrderId(id)
+      if (paymentMethod === 'pix') {
+        // Gera QR code PIX
+        setPixState('loading')
+        const pix = await createOnlinePixPayment({ orderId: id, restaurantId })
+        setPixQrCode(pix.qrCode)
+        setPixBase64(pix.qrCodeBase64)
+        setPixState('waiting')
+        pixPolling.current = setInterval(async () => {
+          const s = await checkOnlinePaymentStatus(id)
+          if (s.paymentStatus === 'approved') {
+            stopPixPolling(); setPixState('approved')
+            setTimeout(() => setStep('success'), 1500)
+          } else if (s.paymentStatus === 'rejected' || s.paymentStatus === 'cancelled') {
+            stopPixPolling(); setPixState('error'); setPixError('Pagamento não aprovado.')
+          }
+        }, 5000)
+        setStep('pix' as Step)
+      } else {
+        setStep('success')
+      }
     } catch (err) {
       console.error('[OnlineOrder] Erro ao finalizar pedido:', err)
       const msg = err instanceof Error ? err.message : String(err)
@@ -263,14 +301,130 @@ export default function OnlineOrderPage() {
         {deliveryType === 'delivery' && address && (
           <p className="mt-3 text-xs text-gray-400">📍 {address}</p>
         )}
+        {paymentMethod && (
+          <p className="mt-2 text-xs text-gray-400">
+            💳 Pagamento: {{
+              pix: 'PIX ✅', cash: 'Dinheiro', credit: 'Cartão de crédito', debit: 'Cartão de débito',
+            }[paymentMethod]}
+          </p>
+        )}
+        {paymentMethod === 'cash' && changeFor && (
+          <p className="mt-1 text-xs text-gray-400">💵 Troco para R$ {parseFloat(changeFor).toFixed(2)}</p>
+        )}
+        {(paymentMethod === 'credit' || paymentMethod === 'debit') && (
+          <p className="mt-1 text-xs text-gray-400">🛵 Maquininha levada pelo entregador</p>
+        )}
       </div>
       <button
-        onClick={() => { setCart([]); setCustomerName(''); setPhone(''); setAddress(''); setNotes(''); setStep('menu') }}
+        onClick={() => {
+          stopPixPolling()
+          setCart([]); setCustomerName(''); setPhone(''); setAddress(''); setNotes('')
+          setPaymentMethod(null); setChangeFor(''); setOrderId('')
+          setPixState('idle'); setPixQrCode(''); setPixBase64(''); setPixError('')
+          setStep('menu')
+        }}
         className="rounded-2xl px-8 py-3 text-sm font-bold text-white"
         style={{ background: color }}
       >
         Fazer novo pedido
       </button>
+    </div>
+  )
+
+  // ─── PIX ─────────────────────────────────────────────────────────────────────
+  if (step === 'pix') return (
+    <div className="flex min-h-screen flex-col bg-gray-50">
+      <div className="sticky top-0 z-10 bg-white px-4 py-4 shadow-sm flex items-center gap-3">
+        <button
+          onClick={() => { stopPixPolling(); setStep('info') }}
+          className="flex h-9 w-9 items-center justify-center rounded-xl bg-gray-100 text-gray-600"
+        >←</button>
+        <div>
+          <p className="font-bold text-gray-900">Pagamento PIX</p>
+          <p className="text-xs text-gray-500">Escaneie o QR Code para pagar</p>
+        </div>
+      </div>
+
+      <div className="flex-1 flex flex-col items-center justify-center p-6 gap-6">
+        {pixState === 'loading' && (
+          <div className="flex flex-col items-center gap-4">
+            <div className="h-12 w-12 animate-spin rounded-full border-4 border-t-transparent" style={{ borderColor: color, borderTopColor: 'transparent' }} />
+            <p className="text-sm text-gray-500">Gerando QR Code…</p>
+          </div>
+        )}
+
+        {pixState === 'waiting' && (
+          <div className="w-full max-w-sm space-y-5">
+            {/* QR Code */}
+            <div className="flex flex-col items-center rounded-2xl bg-white p-6 shadow-sm gap-4">
+              <div className="rounded-2xl border-2 border-gray-100 p-3">
+                {pixBase64 ? (
+                  <img src={`data:image/png;base64,${pixBase64}`} alt="QR Code PIX" className="h-52 w-52" />
+                ) : (
+                  <div className="flex h-52 w-52 items-center justify-center bg-gray-50 rounded-xl text-xs text-gray-400">QR Code</div>
+                )}
+              </div>
+
+              {/* Total */}
+              <div className="w-full rounded-xl bg-green-50 py-3 text-center">
+                <p className="text-xs text-green-600 mb-0.5">Total a pagar</p>
+                <p className="text-2xl font-black text-green-700">R$ {cartTotal.toFixed(2)}</p>
+              </div>
+
+              {/* Pix copia e cola */}
+              {pixQrCode && (
+                <div className="w-full space-y-1.5">
+                  <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Pix Copia e Cola</p>
+                  <div className="flex gap-2">
+                    <input readOnly value={pixQrCode} className="flex-1 rounded-xl border-2 border-gray-100 px-3 py-2.5 text-xs text-gray-600 truncate outline-none" />
+                    <button
+                      onClick={() => navigator.clipboard.writeText(pixQrCode)}
+                      className="rounded-xl px-4 py-2.5 text-xs font-bold text-white"
+                      style={{ background: color }}
+                    >
+                      Copiar
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 text-xs text-gray-400">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" />
+                Aguardando confirmação do pagamento…
+              </div>
+            </div>
+          </div>
+        )}
+
+        {pixState === 'approved' && (
+          <div className="flex flex-col items-center gap-4 text-center">
+            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-green-100 text-4xl">✅</div>
+            <p className="text-xl font-black text-green-700">Pagamento confirmado!</p>
+            <p className="text-sm text-gray-500">Seu pedido foi recebido. Em breve entraremos em contato.</p>
+          </div>
+        )}
+
+        {pixState === 'error' && (
+          <div className="flex flex-col items-center gap-4 text-center">
+            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-red-100 text-4xl">❌</div>
+            <p className="text-base font-bold text-red-700">Pagamento não confirmado</p>
+            <p className="text-sm text-gray-500">{pixError || 'Tente gerar um novo QR Code.'}</p>
+            <button
+              onClick={async () => {
+                setPixState('loading')
+                try {
+                  const pix = await createOnlinePixPayment({ orderId, restaurantId: restaurantId! })
+                  setPixQrCode(pix.qrCode); setPixBase64(pix.qrCodeBase64); setPixState('waiting')
+                } catch { setPixState('error'); setPixError('Não foi possível gerar o PIX.') }
+              }}
+              className="rounded-2xl px-6 py-3 text-sm font-bold text-white"
+              style={{ background: color }}
+            >
+              Tentar novamente
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   )
 
@@ -354,6 +508,74 @@ export default function OnlineOrderPage() {
             </div>
           </div>
 
+          {/* Forma de pagamento */}
+          <div className="rounded-2xl bg-white p-5 shadow-sm">
+            <p className="mb-3 text-sm font-bold text-gray-700">Forma de pagamento</p>
+            <div className="grid grid-cols-2 gap-3">
+              {([
+                { key: 'pix',    label: 'PIX',      icon: '⚡' },
+                { key: 'cash',   label: 'Dinheiro', icon: '💵' },
+                { key: 'credit', label: 'Crédito',  icon: '💳' },
+                { key: 'debit',  label: 'Débito',   icon: '🏦' },
+              ] as { key: PaymentMethod; label: string; icon: string }[]).map(({ key, label, icon }) => (
+                <button
+                  key={key}
+                  onClick={() => setPaymentMethod(key)}
+                  className={`flex flex-col items-center gap-2 rounded-2xl border-2 py-4 text-sm font-bold transition ${
+                    paymentMethod === key ? 'border-current' : 'border-gray-100 text-gray-400 hover:bg-gray-50'
+                  }`}
+                  style={paymentMethod === key ? { borderColor: color, color, background: `${color}10` } : {}}
+                >
+                  <span className="text-2xl">{icon}</span>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Dinheiro → troco */}
+            {paymentMethod === 'cash' && (
+              <div className="mt-4 space-y-2">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Precisa de troco?</p>
+                <input
+                  value={changeFor}
+                  onChange={(e) => setChangeFor(e.target.value)}
+                  placeholder={`Troco para R$ (total: R$ ${cartTotal.toFixed(2)})`}
+                  type="number"
+                  min={cartTotal}
+                  step="0.50"
+                  className="w-full rounded-xl border-2 border-gray-100 px-4 py-3 text-sm text-gray-800 outline-none transition focus:border-gray-300"
+                />
+                <p className="text-xs text-gray-400">Deixe em branco se não precisar de troco.</p>
+              </div>
+            )}
+
+            {/* Cartão → aviso maquininha */}
+            {(paymentMethod === 'credit' || paymentMethod === 'debit') && (
+              <div className="mt-4 flex items-start gap-3 rounded-xl bg-blue-50 p-4">
+                <span className="text-2xl">🛵</span>
+                <div>
+                  <p className="text-sm font-bold text-blue-800">Maquininha na entrega</p>
+                  <p className="mt-0.5 text-xs text-blue-600 leading-relaxed">
+                    Nosso entregador levará a maquininha de cartão. Você paga na hora da entrega.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* PIX → aviso QR code */}
+            {paymentMethod === 'pix' && (
+              <div className="mt-4 flex items-start gap-3 rounded-xl bg-green-50 p-4">
+                <span className="text-2xl">⚡</span>
+                <div>
+                  <p className="text-sm font-bold text-green-800">QR Code gerado após confirmar</p>
+                  <p className="mt-0.5 text-xs text-green-600 leading-relaxed">
+                    Após confirmar o pedido, você receberá o QR Code PIX para realizar o pagamento.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Resumo */}
           <div className="rounded-2xl bg-white p-5 shadow-sm">
             <p className="mb-3 text-xs font-bold uppercase tracking-wide text-gray-400">Resumo</p>
@@ -375,7 +597,7 @@ export default function OnlineOrderPage() {
       <div className="fixed bottom-0 left-0 right-0 border-t border-gray-100 bg-white p-4">
         <button
           onClick={handleFinalize}
-          disabled={sending || !customerName.trim() || (deliveryType === 'delivery' && !address.trim())}
+          disabled={sending || !customerName.trim() || (deliveryType === 'delivery' && !address.trim()) || !paymentMethod}
           className="w-full rounded-2xl py-4 text-base font-black text-white transition active:scale-[.98] disabled:opacity-50"
           style={{ background: color }}
         >

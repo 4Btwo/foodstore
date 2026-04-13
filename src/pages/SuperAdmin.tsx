@@ -347,13 +347,13 @@ function RestaurantCard({
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg font-black text-white shadow-sm"
           style={{ background: restaurant.primaryColor }}
         >
-          {restaurant.name.charAt(0)}
+          {(restaurant.name ?? '?').charAt(0)}
         </div>
         <div className="flex-1 min-w-0">
-          <p className="font-bold text-gray-900">{restaurant.name}</p>
+          <p className="font-bold text-gray-900">{restaurant.name ?? '(sem nome)'}</p>
           <p className="text-xs text-gray-400">
             ID: <span className="font-mono select-all">{restaurant.id}</span>
-            {' · '}Taxa: {(restaurant.serviceRate * 100).toFixed(0)}%
+            {' · '}Taxa: {((restaurant.serviceRate ?? 0) * 100).toFixed(0)}%
             {' · '}<span style={{ color: restaurant.primaryColor }}>●</span> cor
           </p>
         </div>
