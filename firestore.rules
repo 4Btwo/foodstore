@@ -21,7 +21,10 @@ service cloud.firestore {
     function hasSuperAccess() { return isSuperAdmin(); }
 
     match /restaurants/{restaurantId} {
-      allow read:  if hasSuperAccess() || belongsToRestaurant(restaurantId);
+      // Leitura pública para lojas com pedido online habilitado (central /loja)
+      allow read:  if resource.data.onlineOrderEnabled == true
+                   || hasSuperAccess()
+                   || belongsToRestaurant(restaurantId);
       allow write: if hasSuperAccess() || isAdminOf(restaurantId);
     }
 

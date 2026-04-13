@@ -27,6 +27,7 @@ import {
   advanceOrder,
   cancelOrder,
   createBalcaoOrder,
+  deleteOrderFromHistory,
 } from '@/services/unifiedOrders'
 import { subscribeUsers } from '@/services/users'
 import { subscribeAllProducts } from '@/services/productsAdmin'
@@ -513,13 +514,12 @@ function NewBalcaoModal({
 // ─── Card de pedido ───────────────────────────────────────────────────────────
 
 function OrderCard({
-  order, deliverers, onAssign, onBill, compact = false,
+  order, deliverers, onAssign, onBill,
 }: {
   order:      UnifiedOrder
   deliverers: AppUser[]
   onAssign:   (order: UnifiedOrder) => void
   onBill:     (order: UnifiedOrder) => void
-  compact?:   boolean
 }) {
   const [expanded, setExpanded]   = useState(true)
   const [acting, setActing]       = useState(false)
@@ -579,26 +579,21 @@ function OrderCard({
   })()
 
   return (
-    <div className={`rounded-2xl border-2 bg-white shadow-sm transition ${compact ? 'border-gray-100' : isUrgent ? 'border-red-300' : 'border-gray-100'}`}>
+    <div className={`rounded-2xl border-2 bg-white shadow-sm transition ${isUrgent ? 'border-red-300' : 'border-gray-100'}`}>
       {/* Cabeçalho */}
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full text-left px-4 pt-4 pb-3"
       >
         <div className="flex items-start gap-3">
-          {/* Badge de origem — oculto no modo compact (dentro de TableGroup) */}
-          {!compact && (
-            <span className={`shrink-0 rounded-xl px-2.5 py-1 text-xs font-bold border ${cfg.bg} ${cfg.color}`}>
-              {cfg.icon} {cfg.label}
-              {order.tableNumber ? ` ${order.tableNumber}` : ''}
-            </span>
-          )}
+          {/* Badge de origem */}
+          <span className={`shrink-0 rounded-xl px-2.5 py-1 text-xs font-bold border ${cfg.bg} ${cfg.color}`}>
+            {cfg.icon} {cfg.label}
+            {order.tableNumber ? ` ${order.tableNumber}` : ''}
+          </span>
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              {compact && (
-                <span className="text-xs font-mono text-gray-400">#{order.originId.slice(-4).toUpperCase()}</span>
-              )}
               {order.customerName && (
                 <span className="text-sm font-bold text-gray-800 truncate">{order.customerName}</span>
               )}
@@ -697,82 +692,6 @@ const ORIGIN_FILTERS: Array<{ key: UnifiedOrderOrigin | 'all'; label: string; ic
   { key: 'online', label: 'Online',  icon: '🌐' },
 ]
 
-
-// ─── Grupo de pedidos da mesma mesa ──────────────────────────────────────────
-
-function TableGroup({
-  tableNumber, orders, deliverers, onAssign, onBill,
-}: {
-  tableNumber: number
-  orders:      UnifiedOrder[]
-  deliverers:  AppUser[]
-  onAssign:    (o: UnifiedOrder) => void
-  onBill:      (o: UnifiedOrder) => void
-}) {
-  const [collapsed, setCollapsed] = useState(false)
-  const totalTable  = orders.reduce((s, o) => s + o.total, 0)
-  const isAnyReady  = orders.some((o) => o.status === 'ready')
-  const isAnyUrgent = orders.some((o) => {
-    const min = (Date.now() - o.createdAt.getTime()) / 60000
-    return !DONE.includes(o.status) && min >= 20
-  })
-  const allItems = orders.flatMap((o) => o.items)
-
-  return (
-    <div className={`rounded-2xl border-2 bg-white shadow-sm transition ${isAnyUrgent ? 'border-red-300' : isAnyReady ? 'border-green-300' : 'border-blue-200'}`}>
-      {/* Cabeçalho do grupo */}
-      <button
-        onClick={() => setCollapsed(!collapsed)}
-        className="w-full flex items-center justify-between px-4 py-3 text-left"
-      >
-        <div className="flex items-center gap-3">
-          <span className="rounded-xl bg-blue-50 border border-blue-200 px-3 py-1 text-sm font-bold text-blue-700">
-            🍽️ Mesa {tableNumber}
-          </span>
-          <span className="text-xs text-gray-400">{orders.length} pedido{orders.length !== 1 ? 's' : ''}</span>
-          {isAnyUrgent && <span className="text-xs font-bold text-red-500">⚠ Urgente</span>}
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-sm font-black text-gray-800">R$ {totalTable.toFixed(2)}</span>
-          <span className="text-gray-400 text-sm">{collapsed ? '▸' : '▾'}</span>
-        </div>
-      </button>
-
-      {/* Itens resumidos da mesa (sempre visíveis) */}
-      {!collapsed && (
-        <div className="px-4 pb-1">
-          <div className="flex flex-wrap gap-1 mb-2">
-            {allItems.slice(0, 6).map((item, i) => (
-              <span key={i} className="text-xs bg-gray-100 rounded-full px-2 py-0.5 text-gray-600">
-                {item.qty}x {item.name}{item.size ? ` (${item.size})` : ''}
-              </span>
-            ))}
-            {allItems.length > 6 && (
-              <span className="text-xs text-gray-400">+{allItems.length - 6} itens</span>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Cards individuais dos pedidos da mesa */}
-      {!collapsed && (
-        <div className="px-3 pb-3 space-y-2">
-          {orders.map((order) => (
-            <OrderCard
-              key={order.id}
-              order={order}
-              deliverers={deliverers}
-              onAssign={onAssign}
-              onBill={onBill}
-              compact
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 export default function OrdersCenterPage() {
   const { restaurantId }          = useAuth()
   const agent                     = usePrintAgent(restaurantId ?? '', 'central')
@@ -816,17 +735,6 @@ export default function OrdersCenterPage() {
     const min = (Date.now() - o.createdAt.getTime()) / 60000
     return o.status === 'pending' && min >= 10
   }).length
-
-  // ── Grouping logic for mesa orders (computed before render) ─────────────────
-  const mesaOrders   = displayed.filter((o) => o.origin === 'mesa')
-  const otherOrders  = displayed.filter((o) => o.origin !== 'mesa')
-  const tableMap     = new Map<number, UnifiedOrder[]>()
-  mesaOrders.forEach((o) => {
-    const t = o.tableNumber ?? 0
-    if (!tableMap.has(t)) tableMap.set(t, [])
-    tableMap.get(t)!.push(o)
-  })
-  const tableGroups = Array.from(tableMap.entries()).sort(([a], [b]) => a - b)
 
   return (
     <Layout>
@@ -880,7 +788,10 @@ export default function OrdersCenterPage() {
               tab === t ? 'border-brand-500 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            {t === 'active' ? `Ativos (${activeOrders.length})` : `Concluídos (${doneOrders.length})`}
+            {t === 'active'
+              ? `Ativos (${activeOrders.length})`
+              : `Concluídos (${doneOrders.length}${doneOrders.length >= historyLimit ? '+' : ''})`
+            }
           </button>
         ))}
       </div>
@@ -907,47 +818,42 @@ export default function OrdersCenterPage() {
             )}
           </div>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {tab !== 'active' ? (
-              displayed.map((order) => (
-                <OrderCard key={order.id} order={order} deliverers={deliverers}
-                  onAssign={setAssignTarget} onBill={setBillTarget} />
-              ))
-            ) : (filter !== 'all' && filter !== 'mesa') ? (
-              displayed.map((order) => (
-                <OrderCard key={order.id} order={order} deliverers={deliverers}
-                  onAssign={setAssignTarget} onBill={setBillTarget} />
-              ))
-            ) : (
-              <>
-                {tableGroups.map(([tableNum, tableOrders]) =>
-                  tableOrders.length === 1 ? (
-                    <OrderCard key={tableOrders[0].id} order={tableOrders[0]}
-                      deliverers={deliverers} onAssign={setAssignTarget} onBill={setBillTarget} />
-                  ) : (
-                    <TableGroup key={`table-${tableNum}`} tableNumber={tableNum}
-                      orders={tableOrders} deliverers={deliverers}
-                      onAssign={setAssignTarget} onBill={setBillTarget} />
-                  )
-                )}
-                {otherOrders.map((order) => (
-                  <OrderCard key={order.id} order={order} deliverers={deliverers}
-                    onAssign={setAssignTarget} onBill={setBillTarget} />
-                ))}
-              </>
+          <>
+            {tab === 'done' && doneOrders.length > 0 && (
+              <div className="flex justify-end mb-2">
+                <button
+                  onClick={async () => {
+                    if (!confirm(`Excluir todos os ${doneOrders.length} registros do histórico? Esta ação não pode ser desfeita.`)) return
+                    await Promise.all(doneOrders.map((o) => deleteOrderFromHistory(o).catch(console.error)))
+                  }}
+                  className="rounded-xl border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-100"
+                >
+                  🗑️ Limpar histórico
+                </button>
+              </div>
             )}
-          </div>
-          {/* Botão carregar mais — só no histórico */}
-          {tab === 'done' && doneOrders.length >= historyLimit && (
-            <div className="flex justify-center mt-4 pb-4">
-              <button
-                onClick={() => setHistoryLimit((l) => l + 60)}
-                className="rounded-xl border border-gray-300 bg-white px-6 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 shadow-sm"
-              >
-                + Ver mais {historyLimit + 60 > 999 ? '' : `(+60)`}
-              </button>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {displayed.map((order) => (
+                <OrderCard
+                  key={order.id}
+                  order={order}
+                  deliverers={deliverers}
+                  onAssign={setAssignTarget}
+                  onBill={setBillTarget}
+                />
+              ))}
             </div>
-          )}
+            {tab === 'done' && doneOrders.length >= historyLimit && (
+              <div className="flex justify-center mt-4 pb-4">
+                <button
+                  onClick={() => setHistoryLimit((l) => l + 60)}
+                  className="rounded-xl border border-gray-300 bg-white px-6 py-2.5 text-sm font-medium text-gray-600 hover:bg-gray-50 shadow-sm"
+                >
+                  + Ver mais (+60)
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
 

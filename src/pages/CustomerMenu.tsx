@@ -6,7 +6,7 @@ import { doc, getDoc } from "firebase/firestore"
 import { db } from "@/services/firebase"
 import type { Product, ProductSize, Restaurant } from "@/types"
 
-type View = "menu" | "cart" | "pix" | "success"
+type View = "menu" | "cart" | "success"
 type CartItem = { product: Product; qty: number; size?: string; unitPrice: number }
 
 // Popup para selecionar tamanho + quantidade
@@ -136,11 +136,6 @@ export default function CustomerMenuPage() {
   const [calledWaiter, setCalledWaiter]     = useState(false)
   const [loading, setLoading]               = useState(true)
   const [sending, setSending]               = useState(false)
-  const [currentOrderId, setCurrentOrderId] = useState("")
-  const [qrCode, setQrCode]                 = useState("")
-  const [qrBase64, setQrBase64]             = useState("")
-  const [pixTotal, setPixTotal]             = useState(0)
-  const [pixPolling, setPixPolling]         = useState(false)
   const [sizePicker, setSizePicker]         = useState<Product | null>(null)
   const [stockToast, setStockToast]         = useState<{ name: string; qty: number } | null>(null)
 
@@ -222,7 +217,7 @@ export default function CustomerMenuPage() {
     if (!restaurantId || cart.length === 0) return
     setSending(true)
     try {
-      const orderId = await createOrder(
+      await createOrder(
         restaurantId, tableNumber,
         cart.map((i) => ({
           productId: i.product.id,
@@ -232,26 +227,14 @@ export default function CustomerMenuPage() {
           ...(i.size ? { size: i.size } : {}),
         })),
       )
-      setCurrentOrderId(orderId)
-      const { httpsCallable } = await import("firebase/functions")
-      const { functions }     = await import("@/services/firebase")
-      const fn  = httpsCallable(functions, "createPixPayment")
-      const res = await fn({ orderId, restaurantId }) as { data: { qrCode: string; qrCodeBase64: string; total: number } }
-      setQrCode(res.data.qrCode); setQrBase64(res.data.qrCodeBase64); setPixTotal(res.data.total)
-      setView("pix"); startPixPolling(orderId)
-    } catch { alert("Erro ao enviar pedido. Tente novamente.") }
-    finally   { setSending(false) }
-  }
-
-  function startPixPolling(orderId: string) {
-    setPixPolling(true)
-    const interval = setInterval(async () => {
-      const { httpsCallable } = await import("firebase/functions")
-      const { functions }     = await import("@/services/firebase")
-      const fn  = httpsCallable(functions, "checkPaymentStatus")
-      const res = await fn({ orderId }) as { data: { paymentStatus: string } }
-      if (res.data.paymentStatus === "approved") { clearInterval(interval); setPixPolling(false); setView("success") }
-    }, 5000)
+      // Pedido enviado para a central — limpa carrinho e volta ao cardápio
+      setCart([])
+      setView("success")
+    } catch {
+      alert("Erro ao enviar pedido. Tente novamente.")
+    } finally {
+      setSending(false)
+    }
   }
 
   if (loading) return (
@@ -263,44 +246,18 @@ export default function CustomerMenuPage() {
   if (view === "success") return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-gray-50 p-6">
       <div className="flex h-20 w-20 items-center justify-center rounded-full bg-green-100 text-4xl">✅</div>
-      <h2 className="text-xl font-bold text-gray-800">Pagamento confirmado!</h2>
-      <p className="text-center text-sm text-gray-500">Seu pedido foi recebido e será preparado em breve.</p>
-      <button onClick={() => { setCart([]); setView("menu") }} className="mt-4 rounded-xl px-6 py-3 text-sm font-semibold text-white" style={{ background: primaryColor }}>
-        Fazer novo pedido
+      <h2 className="text-xl font-bold text-gray-800">Pedido enviado!</h2>
+      <p className="text-center text-sm text-gray-500">
+        Seu pedido foi recebido pela cozinha e será preparado em breve.<br/>
+        O pagamento é feito no momento do fechamento da conta.
+      </p>
+      <button
+        onClick={() => setView("menu")}
+        className="mt-4 rounded-xl px-8 py-3 text-sm font-semibold text-white"
+        style={{ background: primaryColor }}
+      >
+        Voltar ao cardápio
       </button>
-    </div>
-  )
-
-  if (view === "pix") return (
-    <div className="flex min-h-screen flex-col bg-gray-50">
-      <div className="flex items-center gap-3 bg-white px-4 py-4 shadow-sm">
-        <button onClick={() => setView("cart")} className="text-gray-400 text-xl">←</button>
-        <div><p className="font-semibold text-gray-800">{restaurant?.name}</p><p className="text-xs text-gray-500">Mesa {tableNumber} — Pagar com PIX</p></div>
-      </div>
-      <div className="flex flex-1 flex-col items-center gap-5 p-6">
-        <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-sm">
-          <div className="mb-4 text-center">
-            <p className="text-sm text-gray-500">Total a pagar</p>
-            <p className="text-3xl font-bold text-gray-800">R$ {pixTotal.toFixed(2)}</p>
-            <p className="text-xs text-gray-400">Inclui {(serviceRate * 100).toFixed(0)}% taxa de serviço</p>
-          </div>
-          {qrBase64 ? (
-            <div className="flex justify-center mb-4">
-              <img src={`data:image/png;base64,${qrBase64}`} alt="QR PIX" className="h-52 w-52 rounded-xl border border-gray-100" />
-            </div>
-          ) : (
-            <div className="mb-4 flex h-52 items-center justify-center rounded-xl bg-gray-50 text-sm text-gray-400">Gerando QR Code…</div>
-          )}
-          <div className="mb-4">
-            <p className="mb-1.5 text-xs font-medium text-gray-500">Pix Copia e Cola</p>
-            <div className="flex gap-2">
-              <input readOnly value={qrCode} className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-600 truncate" />
-              <button onClick={() => navigator.clipboard.writeText(qrCode)} className="rounded-lg border border-gray-200 px-3 py-2 text-xs text-gray-600 hover:bg-gray-50 whitespace-nowrap">Copiar</button>
-            </div>
-          </div>
-          {pixPolling && <div className="flex items-center justify-center gap-2 text-xs text-gray-400"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />Aguardando confirmação…</div>}
-        </div>
-      </div>
     </div>
   )
 
@@ -339,7 +296,7 @@ export default function CustomerMenuPage() {
             <div className="flex justify-between font-semibold text-gray-800"><span>Total</span><span>R$ {totalWithFee.toFixed(2)}</span></div>
           </div>
           <button onClick={handleSendOrder} disabled={sending} className="w-full rounded-xl py-3 text-sm font-semibold text-white disabled:opacity-60" style={{ background: primaryColor }}>
-            {sending ? "Processando…" : "Confirmar e pagar com PIX"}
+            {sending ? "Enviando…" : "✅ Confirmar pedido"}
           </button>
         </div>
       )}
